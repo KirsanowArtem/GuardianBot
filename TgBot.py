@@ -18,7 +18,7 @@ current_number = 1
 BOT_TOKEN = "7628643183:AAFkpHzp0o7WTFOKa6pjApDl4FDpr6aAOzs"
 ERROR_GROUP_ID = -1002295285798  # ID группы для ошибок
 SPECIAL_GROUP_ID = -1002483663129  # ID групы с банами и предупреждениями
-
+MUT_SECONDS=60
 """
 group_data = {
     -1001234567890: {  # ID группы
@@ -43,6 +43,7 @@ group_data = {
             }
         },
         "MAX_MESSAGES_PER_SECOND": 10,  # Максимум сообщений в секунду для этой группы
+        "MUT_SECONDS": 120, # Время временного мута
         "user_message_timestamps": {},  # Временные метки сообщений для пользователей
     },
     -1009876543210: {  # Другая группа
@@ -67,13 +68,14 @@ group_data = {
             }
         },
         "MAX_MESSAGES_PER_SECOND": 10,  # Максимум сообщений в секунду для этой группы
+        "MUT_SECONDS"'": 300, # Время временного мута
         "user_message_timestamps": {},  # Временные метки сообщений для пользователей
     }
 }
 """
 
 async def start(update: Update, context: CallbackContext):
-    global current_number  # Указываем, что используем глобальную переменную current_number
+    global current_number
 
     user_id = update.effective_user.id
     chat_id = update.effective_chat.id
@@ -83,13 +85,13 @@ async def start(update: Update, context: CallbackContext):
         return
 
     if chat_id not in group_data:
-        # Инициализация данных для новой группы
         group_data[chat_id] = {
             'group_name': update.effective_chat.title,
             'users': {},
             'banned_words': [],
-            'MAX_MESSAGES_PER_SECOND': 10,  # Максимум сообщений в секунду для этой группы
-            'user_message_timestamps': {}  # Временные метки сообщений для пользователей
+            'MAX_MESSAGES_PER_SECOND': 10,
+            'MUT_SECONDS': 300,
+            'user_message_timestamps': {}
         }
 
     if user_id not in group_data[chat_id]['users']:
@@ -102,9 +104,8 @@ async def start(update: Update, context: CallbackContext):
             'warnings': 0,
             'banned': False
         }
-        current_number += 1  # Увеличиваем current_number
+        current_number += 1
 
-    # Инициализация временных меток сообщений для нового пользователя в группе
     if user_id not in group_data[chat_id]['user_message_timestamps']:
         group_data[chat_id]['user_message_timestamps'][user_id] = []
 
@@ -120,7 +121,6 @@ async def my_groups(update: Update, context: CallbackContext):
 
     user_id = update.effective_user.id
 
-    # Получение списка групп, в которых есть пользователь
     user_groups = [
         chat_id for chat_id, data in group_data.items()
         if user_id in data['users']
@@ -130,12 +130,10 @@ async def my_groups(update: Update, context: CallbackContext):
         await update.message.reply_text("Вы не добавлены ни в одну группу.")
         return
 
-    # Создание кнопок для каждой группы
     keyboard = [
         [InlineKeyboardButton(group_data[chat_id]['group_name'], callback_data=f"group_{chat_id}")]
         for chat_id in user_groups
     ]
-    keyboard.append([InlineKeyboardButton("Настройки", callback_data="settings")])
     reply_markup = InlineKeyboardMarkup(keyboard)
 
     await update.message.reply_text("Ваши группы:", reply_markup=reply_markup)
@@ -152,19 +150,17 @@ async def group_settings(update: Update, context: CallbackContext):
 
     group_name = group_data[group_id]['group_name']
 
-    # Кнопки для настроек
     keyboard = [
         [InlineKeyboardButton("Просмотреть всех пользователей", callback_data=f"view_users_{group_id}")],
         [InlineKeyboardButton("Настроить запрещенные слова", callback_data=f"banned_words_{group_id}")],
         [InlineKeyboardButton("Настроить лимит сообщений в секунду", callback_data=f"set_max_messages_{group_id}")],
-        [InlineKeyboardButton("Сбросить временные метки сообщений", callback_data=f"reset_timestamps_{group_id}")]
+        [InlineKeyboardButton("Настроить временый мут", callback_data=f"set_mut_{group_id}")]
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
 
     await query.edit_message_text(f"Перешли в настройки группы: {group_name}.", reply_markup=reply_markup)
 
 
-# Команда для настройки лимита сообщений в секунду
 async def set_max_messages(update: Update, context: CallbackContext):
     query = update.callback_query
     await query.answer()
@@ -178,8 +174,6 @@ async def set_max_messages(update: Update, context: CallbackContext):
     context.user_data['awaiting_max_messages'] = True
     await query.message.reply_text("Введите новый лимит сообщений в секунду:")
 
-
-# Сохранение нового лимита сообщений
 async def save_max_messages(update: Update, context: CallbackContext):
     if not context.user_data.get('awaiting_max_messages'):
         return
@@ -194,7 +188,6 @@ async def save_max_messages(update: Update, context: CallbackContext):
         if new_limit < 1:
             await update.message.reply_text("Лимит должен быть положительным числом.")
             return
-        # Обновляем значение лимита для группы
         group_data[group_id]['MAX_MESSAGES_PER_SECOND'] = new_limit
         context.user_data['awaiting_max_messages'] = False
         await update.message.reply_text(
@@ -204,7 +197,53 @@ async def save_max_messages(update: Update, context: CallbackContext):
         await update.message.reply_text("Пожалуйста, укажите корректное число.")
 
 
-# Команда для сброса временных меток сообщений
+
+async def set_mut(update: Update, context: CallbackContext):
+    query = update.callback_query
+    await query.answer()
+
+    group_id = int(query.data.split("_")[2])
+    if group_id not in group_data:
+        await query.message.reply_text("Группа не найдена.")
+        return
+
+    context.user_data['current_group'] = group_id
+    context.user_data['awaiting_mut'] = True
+    await query.message.reply_text("Введите новое количество минут мута:")
+
+
+async def save_mut(update: Update, context: CallbackContext):
+
+    if context.user_data.get('awaiting_mut', False):
+        try:
+            input_text = update.message.text.strip()
+
+            days, hours, minutes, seconds = 0, 0, 0, 0
+            if input_text.isdigit():
+                total_seconds = int(input_text)
+            else:
+                pattern = r'(?:(\d+)d)?(?:(\d+)h)?(?:(\d+)m)?(?:(\d+)s)?'
+                match = re.fullmatch(pattern, input_text)
+                if match:
+                    days = int(match.group(1) or 0)
+                    hours = int(match.group(2) or 0)
+                    minutes = int(match.group(3) or 0)
+                    seconds = int(match.group(4) or 0)
+                else:
+                    raise ValueError("Неверный формат времени. Используйте формат '1d5h8m10s' или число секунд.")
+                total_seconds = days * 86400 + hours * 3600 + minutes * 60 + seconds
+
+            group_id = context.user_data['current_group']
+            group_data[group_id]['MUT_SECONDS'] = total_seconds
+            context.user_data['awaiting_mut'] = False
+            await update.message.reply_text(f"Время мута установлено на {total_seconds} секунд.")
+        except Exception as e:
+            await update.message.reply_text(f"Ошибка: {str(e)}. Попробуйте снова.")
+    else:
+        await update.message.reply_text("Неверный ввод. Попробуйте снова.")
+
+
+
 async def reset_timestamps(update: Update, context: CallbackContext):
     query = update.callback_query
     await query.answer()
@@ -220,7 +259,6 @@ async def reset_timestamps(update: Update, context: CallbackContext):
         f"Временные метки сообщений для группы {group_data[group_id]['group_name']} были сброшены.")
 
 
-# Команда для настройки запрещённых слов
 async def set_banned_words(update: Update, context: CallbackContext):
     query = update.callback_query
     await query.answer()
@@ -237,7 +275,6 @@ async def set_banned_words(update: Update, context: CallbackContext):
     )
 
 
-# Сохранение запрещённых слов
 async def save_banned_words(update: Update, context: CallbackContext):
     if not context.user_data.get('awaiting_banned_words'):
         return
@@ -260,32 +297,25 @@ async def handle_message(update: Update, context: CallbackContext):
     chat_id = update.effective_chat.id
     message_text = update.message.text
 
-    # Проверка наличия данных для группы
     if chat_id not in group_data:
         return
 
-    # Получаем MAX_MESSAGES_PER_SECOND и user_message_timestamps для текущей группы
     MAX_MESSAGES_PER_SECOND = group_data[chat_id].get('MAX_MESSAGES_PER_SECOND', 10)
     user_message_timestamps = group_data[chat_id].get('user_message_timestamps', {})
 
     current_time = time.time()
 
-    # Инициализация временных меток для нового пользователя, если их еще нет
     if user_id not in user_message_timestamps:
         user_message_timestamps[user_id] = []
 
-    # Очистка старых меток сообщений
     user_message_timestamps[user_id] = [timestamp for timestamp in user_message_timestamps[user_id] if current_time - timestamp < 1]
 
-    # Добавление новой метки времени
     user_message_timestamps[user_id].append(current_time)
 
-    # Если количество сообщений больше лимита, обрабатываем как спам
     if len(user_message_timestamps[user_id]) > MAX_MESSAGES_PER_SECOND:
         await handle_spam(update, context, user_id)
         return
 
-    # Проверка на запрещенные слова
     banned_words = group_data[chat_id].get('banned_words', [])
     if any(word in message_text for word in banned_words):
         await check_message(update, context)
@@ -294,14 +324,14 @@ async def handle_spam(update: Update, context: CallbackContext, user_id: int):
     chat_id = update.effective_chat.id
     user_data = group_data[chat_id]['users'].get(user_id)
     MAX_MESSAGES_PER_SECOND = group_data[chat_id].get('MAX_MESSAGES_PER_SECOND', 10)
+    MUT_SECONDS = group_data[chat_id]['MUT_SECONDS']
 
     if user_data:
         if user_data.get('muted', False):
             return
 
-        until_date = datetime.now(timezone.utc) + timedelta(minutes=1)
+        until_date = datetime.now(timezone.utc) + timedelta(seconds=MUT_SECONDS)
 
-        # Мутим пользователя на 1 минуту за спам
         await update.message.chat.restrict_member(
             user_id,
             ChatPermissions(can_send_messages=False),
@@ -310,19 +340,15 @@ async def handle_spam(update: Update, context: CallbackContext, user_id: int):
 
         await update.message.delete()
 
-        # Уведомление пользователя о муте
         await context.bot.send_message(
             user_id, text=f"{update.effective_user.first_name} Вы превысили лимит сообщений. Вам выдано предупреждение, и вы временно замучены на 1 минуту."
         )
 
-        # Уведомление группы о нарушении
         await context.bot.send_message(chat_id, text=f"Пользователь {update.effective_user.first_name} превысил лимит сообщений в секунду.")
 
-        # Увеличиваем количество предупреждений
         user_data['warnings'] += 1
         warnings_count = user_data['warnings']
 
-        # Если 5 предупреждений - баним
         if warnings_count >= 5:
             user_data['banned'] = True
 
@@ -344,7 +370,6 @@ async def handle_spam(update: Update, context: CallbackContext, user_id: int):
                 f"#Spam"
             )
 
-        # Отправка сообщения в специальную группу для уведомлений
         await context.bot.send_message(SPECIAL_GROUP_ID, violation_message)
 
 async def check_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -447,6 +472,10 @@ async def handle_callback_query(update: Update, context: CallbackContext):
         await set_banned_words(update, context)
     elif query.data.startswith("view_users_"):
         await view_users(update, context)
+    elif query.data.startswith('awaiting_max_messages_'):
+        await save_max_messages(update, context)
+    elif query.data.startswith('awaiting_mut_'):
+        await save_mut(update, context)
 
 async def user_info(update: Update, context: CallbackContext):
     user_id = update.effective_user.id
@@ -511,22 +540,30 @@ async def debug(update: Update, context: CallbackContext):
 async def process_message(update: Update, context: CallbackContext):
     if context.user_data.get('awaiting_banned_words', False):
         await save_banned_words(update, context)
+    elif context.user_data.get('awaiting_max_messages', False):
+        await save_max_messages(update, context)
+    elif context.user_data.get('awaiting_mut', False):
+        await save_mut(update, context)
     else:
         await handle_message(update, context)
 
 async def main():
     application = Application.builder().token(BOT_TOKEN).build()
+
     application.add_handler(CommandHandler("start", start))
     application.add_handler(CommandHandler("mygroups", my_groups))
     application.add_handler(CommandHandler("userinfo", user_info))
     application.add_handler(CommandHandler("ban", ban_user))
     application.add_handler(CommandHandler("unban", unban_user))
     application.add_handler(CommandHandler("warn", warn_user))
+
     application.add_handler(CallbackQueryHandler(group_settings, pattern="^group_"))
     application.add_handler(CallbackQueryHandler(view_users, pattern="^view_users_"))
     application.add_handler(CallbackQueryHandler(set_banned_words, pattern="^banned_words_"))
     application.add_handler(CallbackQueryHandler(set_max_messages, pattern="^set_max_messages_"))
+    application.add_handler(CallbackQueryHandler(set_mut, pattern="^set_mut_"))
     application.add_handler(CallbackQueryHandler(reset_timestamps, pattern="^reset_timestamps_"))
+
 
 
     application.add_handler(MessageHandler(filters.TEXT, process_message))
