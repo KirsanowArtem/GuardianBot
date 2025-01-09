@@ -3,17 +3,31 @@ import re
 import nest_asyncio
 import asyncio
 import time
+import random
+import io
+import string
 
 from datetime import datetime, timedelta, timezone
+
 from telegram import Update, InlineKeyboardMarkup, InlineKeyboardButton, Bot, ChatPermissions
+from telegram.constants import ChatMemberStatus
+
 from telegram.ext import Application, CommandHandler, CallbackQueryHandler, MessageHandler, ContextTypes, filters, CallbackContext, Updater
+
+from PIL import Image, ImageDraw, ImageFont
+
 from collections import defaultdict
 from flask import Flask
+
+
+
+
 
 
 nest_asyncio.apply()
 
 group_data = {}
+captcha_data = {}
 current_number = 1
 BOT_TOKEN = "7628643183:AAFkpHzp0o7WTFOKa6pjApDl4FDpr6aAOzs"
 ERROR_GROUP_ID = -1002295285798  # ID группы для ошибок
@@ -75,11 +89,15 @@ group_data = {
 }
 """
 
-async def start(update: Update, context: CallbackContext):
-    global current_number
 
-    user_id = update.effective_user.id
+async def start(update: Update, context: CallbackContext):
     chat_id = update.effective_chat.id
+    user_id = update.effective_user.id
+
+    chat_member = await update.effective_chat.get_member(user_id)
+    if chat_member.status == 'creator':
+        await update.message.reply_text("Вы не можете быть ограничены, так как являетесь владельцем чата.")
+        return
 
     if update.message.chat.type not in ["group", "supergroup"]:
         await update.message.reply_text("Эта команда доступна только в группах.")
@@ -91,29 +109,185 @@ async def start(update: Update, context: CallbackContext):
             'users': {},
             'banned_words': [],
             'MAX_MESSAGES_PER_SECOND': 10,
-            'MUT_SECONDS': 300,
+            'MUT_SECONDS': 60,
             'SPECIAL_GROUP_ID': -1002483663129,
             'user_message_timestamps': {}
         }
 
     if user_id not in group_data[chat_id]['users']:
-        formatted_number = str(current_number).zfill(10)
         group_data[chat_id]['users'][user_id] = {
             'name': update.effective_user.first_name or "Без имени",
             'nickname': update.effective_user.username or "Нет никнейма",
-            'number': formatted_number,
+            'number': None,
             'telegram_id': user_id,
             'warnings': 0,
-            'banned': False
+            'banned': False,
+            'captcha_attempts': 0,
+            'captcha_expiry': datetime.now(timezone.utc) + timedelta(hours=1)
         }
-        current_number += 1
 
-    if user_id not in group_data[chat_id]['user_message_timestamps']:
-        group_data[chat_id]['user_message_timestamps'][user_id] = []
+        until_date = datetime.now(timezone.utc) + timedelta(hours=1)
+        await update.message.chat.restrict_member(
+            user_id,
+            ChatPermissions(can_send_messages=False),
+            until_date=until_date
+        )
 
-    await update.message.reply_text(
-        f"Привет, {update.effective_user.first_name}! Ты был добавлен в группу {update.effective_chat.title}. Используй /mygroups для просмотра своих групп."
-    )
+        await send_captcha(update, context, chat_id, user_id)
+
+
+async def send_captcha(update: Update, context: CallbackContext, chat_id, user_id, message_id=None):
+    characters = string.ascii_lowercase + string.digits
+    correct_text = ''.join(random.choices(characters, k=8))
+    wrong_answers = [correct_text[:i] + random.choice(characters) + correct_text[i + 1:] for i in range(8)]
+    options = wrong_answers + [correct_text]
+    random.shuffle(options)
+
+    captcha_data[user_id] = {
+        'correct_text': correct_text,
+        'attempts': captcha_data[user_id]['attempts'] + 1 if user_id in captcha_data else 0,
+        'expiry': datetime.now(timezone.utc) + timedelta(hours=1)
+    }
+
+    if message_id:
+        try:
+            await context.bot.edit_message_caption(
+                chat_id=chat_id,
+                message_id=message_id,
+                caption=f"{correct_text}\nВыберите правильный вариант:",
+                reply_markup=InlineKeyboardMarkup([
+                    [InlineKeyboardButton(text=option, callback_data=f"captcha_{user_id}_{option}")] for option in options[:4]
+                ])
+            )
+        except Exception as e:
+            logging.error(f"Не удалось обновить сообщение капчи: {e}")
+    else:
+        await context.bot.send_message(
+            chat_id=chat_id,
+            text=f"{correct_text}\nВыберите правильный вариант:",
+            reply_markup=InlineKeyboardMarkup([
+                [InlineKeyboardButton(text=option, callback_data=f"captcha_{user_id}_{option}")] for option in options[:4]
+            ])
+        )
+
+async def captcha_callback(update: Update, context: CallbackContext):
+    query = update.callback_query
+    await query.answer()
+
+    data = query.data.split("_")
+    user_id = int(data[1])
+    selected_option = data[2]
+
+    if user_id not in captcha_data:
+        await query.message.reply_text("Капча устарела. Попробуйте снова.")
+        return
+
+    correct_text = captcha_data[user_id]['correct_text']
+    attempts = captcha_data[user_id]['attempts']
+    print(attempts)
+    expiry = captcha_data[user_id]['expiry']
+
+    if datetime.now(timezone.utc) > expiry:
+        await captcha_remove_user(update, context, query.message.chat.id, user_id)
+        del captcha_data[user_id]
+        return
+
+    if selected_option == correct_text:
+        await query.message.reply_text("Капча пройдена! Мут снят.")
+        await query.message.chat.restrict_member(
+            user_id,
+            ChatPermissions(can_send_messages=True)
+        )
+        del captcha_data[user_id]
+    else:
+        attempts += 1
+        captcha_data[user_id]['attempts'] = attempts
+        if selected_option != correct_text:
+            await send_captcha(update, context, query.message.chat.id, user_id, query.message.message_id)
+            await query.message.reply_text("Неправильный ответ. Попробуйте снова.")
+            return
+
+        if attempts >= 5:
+            await captcha_remove_user(update, context, query.message.chat.id, user_id)
+            del captcha_data[user_id]
+        else:
+            await query.message.reply_text("Неправильный ответ. Попробуйте снова.")
+            await send_captcha(update, context, query.message.chat.id, user_id)
+
+
+async def captcha_remove_user(update: Update, context: CallbackContext, chat_id, user_id):
+    await context.bot.ban_chat_member(chat_id, user_id)
+    group_data[chat_id]['users'][user_id]['banned'] = True
+    name = group_data[chat_id]['users'][user_id]['name']
+    await context.bot.send_message(chat_id, f"Пользователь {name} удален из чата за неудачные попытки пройти капчу.")
+
+async def captcha_ban_user(update: Update, context: CallbackContext, chat_id, user_id):
+    await context.bot.kick_chat_member(chat_id, user_id)
+    group_data[chat_id]['users'][user_id]['banned'] = True
+    await context.bot.send_message(chat_id, f"Пользователь {user_id} забанен за неудачную попытку пройти капчу.")
+
+async def delete_captcha_message(context: CallbackContext, chat_id, message_id):
+    try:
+        await context.bot.delete_message(chat_id, message_id)
+    except Exception as e:
+        logging.error(f"Не удалось удалить сообщение с капчей: {e}")
+
+
+async def new_member(update: Update, context: CallbackContext):
+    chat_id = update.effective_chat.id
+    for member in update.message.new_chat_members:
+        user_id = member.id
+
+        chat_member = await update.effective_chat.get_member(user_id)
+        if chat_member.status == 'creator':
+            continue
+
+        if chat_id not in group_data:
+            group_data[chat_id] = {
+                'group_name': update.effective_chat.title,
+                'users': {},
+                'banned_words': [],
+                'MAX_MESSAGES_PER_SECOND': 10,
+                'MUT_SECONDS': 60,
+                'SPECIAL_GROUP_ID': -1002483663129,
+                'user_message_timestamps': {}
+            }
+
+        if user_id not in group_data[chat_id]['users']:
+            group_data[chat_id]['users'][user_id] = {
+                'name': member.first_name or "Без имени",
+                'nickname': member.username or "Нет никнейма",
+                'number': None,
+                'telegram_id': user_id,
+                'warnings': 0,
+                'banned': False,
+                'captcha_attempts': 0,
+                'captcha_expiry': datetime.now(timezone.utc) + timedelta(hours=1)
+            }
+
+        until_date = datetime.now(timezone.utc) + timedelta(seconds=60)
+        await update.message.chat.restrict_member(
+            user_id,
+            ChatPermissions(can_send_messages=False),
+            until_date=until_date
+        )
+
+        await send_captcha(update, context, chat_id, user_id)
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 async def my_groups(update: Update, context: CallbackContext):
     if update.message.chat.type != "private":
@@ -539,7 +713,11 @@ async def send_error_message(application: Application, error: str, group_name: s
     error_message = f"Ошибка в группе {group_name} (ссылка: https://t.me/c/{str(ERROR_GROUP_ID)[4:]})\n\nОшибка: {error}"
 
     if update and update.message:
-        message_link = f"https://t.me/{update.effective_chat.username}/{update.message.message_id}"
+        chat = update.effective_chat
+        if chat.username:
+            message_link = f"https://t.me/{chat.username}/{update.message.message_id}"
+        else:
+            message_link = f"https://t.me/c/{str(chat.id)[4:]}/{update.message.message_id}"
         error_message += f"\nСообщение, в котором произошла ошибка: {message_link}"
 
     await application.bot.send_message(ERROR_GROUP_ID, error_message)
@@ -589,8 +767,9 @@ async def main():
     application.add_handler(CallbackQueryHandler(set_max_messages, pattern="^set_max_messages_"))
     application.add_handler(CallbackQueryHandler(set_warn_grup, pattern="^set_warn_grup_"))
     application.add_handler(CallbackQueryHandler(set_mut, pattern="^set_mut_"))
+    application.add_handler(CallbackQueryHandler(captcha_callback, pattern="^captcha_"))
 
-
+    application.add_handler(MessageHandler(filters.StatusUpdate.NEW_CHAT_MEMBERS, new_member))
 
     application.add_handler(MessageHandler(filters.TEXT, process_message))
 
