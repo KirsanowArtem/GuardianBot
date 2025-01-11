@@ -58,6 +58,8 @@ group_data = {
         "MAX_MESSAGES_PER_SECOND": 10,  # Максимум сообщений в секунду для этой группы
         "MUT_SECONDS": 120, # Время временного мута
         "SPECIAL_GROUP_ID": -1002483663129    # ID групы с банами и предупреждениями
+        "CAPTCHA_TIMEOUT": 3600,  # Максимальное время бездействия капчи
+        "CAPTCHA_ATTEMPTS": 5,    # Максимальное количество попыток капчи
         "user_message_timestamps": {},  # Временные метки сообщений для пользователей
     },
     -1009876543210: {  # Другая группа
@@ -84,6 +86,8 @@ group_data = {
         "MAX_MESSAGES_PER_SECOND": 10,  # Максимум сообщений в секунду для этой группы
         "MUT_SECONDS"'": 300, # Время временного мута
         "SPECIAL_GROUP_ID": -1002295285798    # ID групы с банами и предупреждениями
+        "CAPTCHA_TIMEOUT": 60,  # Максимальное время бездействия капчи
+        "CAPTCHA_ATTEMPTS": 2,    # Максимальное количество попыток капчи
         "user_message_timestamps": {},  # Временные метки сообщений для пользователей
     }
 }
@@ -106,6 +110,8 @@ async def start(update: Update, context: CallbackContext):
             'MAX_MESSAGES_PER_SECOND': 10,
             'MUT_SECONDS': 60,
             'SPECIAL_GROUP_ID': -1002483663129,
+            "CAPTCHA_TIMEOUT": 3600,
+            "CAPTCHA_ATTEMPTS": 5,
             'user_message_timestamps': {}
         }
 
@@ -137,16 +143,25 @@ async def start(update: Update, context: CallbackContext):
 async def send_captcha(update: Update, context: CallbackContext, chat_id, user_id):
     characters = string.ascii_lowercase + string.digits
     correct_text = ''.join(random.choices(characters, k=8))
-    wrong_answers = [correct_text[:i] + random.choice(characters) + correct_text[i + 1:] for i in range(8)]
 
-    options = wrong_answers + [correct_text]
+    wrong_answers = set()
+    while len(wrong_answers) < 3:
+        wrong_text = ''.join(
+            random.choice(characters) if random.random() > 0.7 else c
+            for c in correct_text
+        )
+        if wrong_text != correct_text:
+            wrong_answers.add(wrong_text)
+
+    options = list(wrong_answers) + [correct_text]
     random.shuffle(options)
 
     if user_id not in captcha_data:
         captcha_data[user_id] = {
             'correct_text': correct_text,
             'attempts': 0,
-            'expiry': datetime.now(timezone.utc) + timedelta(hours=1)
+            'expiry': datetime.now(timezone.utc) + timedelta(hours=1),
+            'captcha_message_id': None,
         }
     else:
         captcha_data[user_id]['correct_text'] = correct_text
@@ -165,16 +180,17 @@ async def send_captcha(update: Update, context: CallbackContext, chat_id, user_i
     image.save(image_stream, format='PNG')
     image_stream.seek(0)
 
-    buttons = [[InlineKeyboardButton(text=option, callback_data=f"captcha_{user_id}_{option}")]
-               for option in options[:4]]
+    buttons = [[InlineKeyboardButton(text=option, callback_data=f"captcha_{user_id}_{option}")] for option in options]
     keyboard = InlineKeyboardMarkup(buttons)
 
-    await context.bot.send_photo(
+    message = await context.bot.send_photo(
         chat_id=chat_id,
         photo=image_stream,
         caption="Выберите правильный вариант:",
         reply_markup=keyboard
     )
+
+    captcha_data[user_id]['captcha_message_id'] = message.message_id
 
 async def captcha_callback(update: Update, context: CallbackContext):
     query = update.callback_query
@@ -185,7 +201,11 @@ async def captcha_callback(update: Update, context: CallbackContext):
     selected_option = data[2]
 
     if user_id not in captcha_data:
-        await query.message.reply_text("Капча устарела. Попробуйте снова.")
+        await query.message.delete()
+        await context.bot.send_message(
+            chat_id=query.message.chat.id,
+            text="Капча устарела. Попробуйте снова."
+        )
         return
 
     correct_text = captcha_data[user_id]['correct_text']
@@ -193,12 +213,18 @@ async def captcha_callback(update: Update, context: CallbackContext):
     expiry = captcha_data[user_id]['expiry']
 
     if datetime.now(timezone.utc) > expiry:
+        await query.message.delete()
         await captcha_ban_user(update, context, query.message.chat.id, user_id)
         del captcha_data[user_id]
         return
 
     if selected_option == correct_text:
-        await query.message.reply_text("Капча пройдена! Мут снят.")
+
+        await query.message.delete()
+        await context.bot.send_message(
+            chat_id=query.message.chat.id,
+            text="Капча пройдена! Мут снят."
+        )
         await query.message.chat.restrict_member(
             user_id,
             ChatPermissions(can_send_messages=True)
@@ -208,26 +234,54 @@ async def captcha_callback(update: Update, context: CallbackContext):
         attempts += 1
         captcha_data[user_id]['attempts'] = attempts
         if attempts >= 5:
+            await query.message.delete()
             await captcha_ban_user(update, context, query.message.chat.id, user_id)
             del captcha_data[user_id]
         else:
-            await query.message.reply_text("Неправильный ответ. Попробуйте снова.")
+            await query.message.delete()
+            await context.bot.send_message(
+                chat_id=query.message.chat.id,
+                text="Неправильный ответ. Попробуйте снова."
+            )
             await send_captcha(update, context, query.message.chat.id, user_id)
 
 
-
-
-async def captcha_ban_user(update: Update, context: CallbackContext, chat_id, user_id):
+async def captcha_ban_user(update: Update, context: CallbackContext, chat_id, user_id, timeout_expired=False):
     await context.bot.ban_chat_member(chat_id, user_id)
     group_data[chat_id]['users'][user_id]['banned'] = True
     name = group_data[chat_id]['users'][user_id]['name']
-    await context.bot.send_message(chat_id, f"Пользователь {name} удален из чата за неудачные попытки пройти капчу.")
+
+    reason = "превышено время ожидания" if timeout_expired else "превышено количество попыток"
+    ban_message = (
+        f"Пользователь {name} (@{group_data[chat_id]['users'][user_id]['nickname']}) удален из чата за неудачные попытки пройти капчу.\n"
+        f"Причина: {reason}.\n"
+        f"#CAPTCHA_BAN\n"
+        f"#BAN"
+    )
+
+    special_group_id = group_data[chat_id].get("SPECIAL_GROUP_ID", -1002483663129)
+    await context.bot.send_message(special_group_id, ban_message)
+    await context.bot.send_message(chat_id, f"Пользователь {name} удален из чата за {reason}.")
 
 async def delete_captcha_message(context: CallbackContext, chat_id, message_id):
     try:
         await context.bot.delete_message(chat_id, message_id)
     except Exception as e:
         logging.error(f"Не удалось удалить сообщение с капчей: {e}")
+
+async def captcha_timeout_check(context: CallbackContext, user_id):
+    while user_id in captcha_data:
+        expiry = captcha_data[user_id]['expiry']
+        if datetime.now(timezone.utc) >= expiry:
+            chat_id = captcha_data[user_id]['chat_id']
+            await captcha_ban_user(None, context, chat_id, user_id, timeout_expired=True)
+            del captcha_data[user_id]
+            break
+        await asyncio.sleep(5)  # Проверяем каждые 5 секунд
+
+
+
+
 
 
 async def new_member(update: Update, context: CallbackContext):
@@ -325,13 +379,36 @@ async def group_settings(update: Update, context: CallbackContext):
         [InlineKeyboardButton("Просмотреть всех пользователей", callback_data=f"view_users_{group_id}")],
         [InlineKeyboardButton("Настроить запрещенные слова", callback_data=f"banned_words_{group_id}")],
         [InlineKeyboardButton("Настроить лимит сообщений в секунду", callback_data=f"set_max_messages_{group_id}")],
-        [InlineKeyboardButton("Настроить временый мут", callback_data=f"set_mut_{group_id}")],
-        [InlineKeyboardButton("Настроить групу с предупреждениями и банами", callback_data=f"set_warn_grup_{group_id}")]
+        [InlineKeyboardButton("Настроить временный мут", callback_data=f"set_mut_{group_id}")],
+        [InlineKeyboardButton("Настроить группу с предупреждениями и банами", callback_data=f"set_warn_grup_{group_id}")],
+        [InlineKeyboardButton("Изменить время жизни капчи", callback_data=f"set_captcha_timeout_{group_id}")],
+        [InlineKeyboardButton("Изменить количество попыток капчи", callback_data=f"set_captcha_attempts_{group_id}")],
+        [InlineKeyboardButton("Просмотреть настройки группы", callback_data=f"view_settings_{group_id}")]
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
 
-    await query.edit_message_text(f"Перешли в настройки группы: {group_name}.", reply_markup=reply_markup)
+    await query.edit_message_text(f"Настройки группы: {group_name}", reply_markup=reply_markup)
 
+async def view_settings(update: Update, context: CallbackContext):
+    query = update.callback_query
+    await query.answer()
+
+    group_id = int(query.data.split("_")[2])
+    if group_id not in group_data:
+        await query.message.reply_text("Группа не найдена.")
+        return
+
+    settings = group_data[group_id]
+    response = (
+        f"Настройки группы '{settings['group_name']}':\n"
+        f"- Лимит сообщений в секунду: {settings['MAX_MESSAGES_PER_SECOND']}\n"
+        f"- Время временного мута (сек): {settings['MUT_SECONDS']}\n"
+        f"- Время жизни капчи (сек): {settings.get('CAPTCHA_TIMEOUT', 3600)}\n"
+        f"- Количество попыток капчи: {settings.get('CAPTCHA_ATTEMPTS', 5)}\n"
+        f"- ID группы с предупреждениями: {settings['SPECIAL_GROUP_ID']}\n"
+        f"- Запрещенные слова: {', '.join(settings['banned_words']) if settings['banned_words'] else 'Нет'}"
+    )
+    await query.message.reply_text(response)
 
 
 async def set_banned_words(update: Update, context: CallbackContext):
@@ -388,7 +465,49 @@ async def set_warn_grup(update: Update, context: CallbackContext):
     context.user_data['awaiting_warn_grup'] = True
     await query.message.reply_text("Введите новый id групы, его можно узнать например из бота @getmyid_bot")
 
+async def set_captcha_timeout(update: Update, context: CallbackContext):
+    query = update.callback_query
+    await query.answer()
 
+    group_id = int(query.data.split("_")[3])
+    if group_id not in group_data:
+        await query.message.reply_text("Группа не найдена.")
+        return
+
+    context.user_data['current_group'] = group_id
+    context.user_data['awaiting_captcha_timeout'] = True
+    await query.message.reply_text("Введите новое время жизни капчи (в секундах):")
+
+async def set_captcha_attempts(update: Update, context: CallbackContext):
+    query = update.callback_query
+    await query.answer()
+
+    group_id = int(query.data.split("_")[3])
+    if group_id not in group_data:
+        await query.message.reply_text("Группа не найдена.")
+        return
+
+    context.user_data['current_group'] = group_id
+    context.user_data['awaiting_captcha_attempts'] = True
+    await query.message.reply_text("Введите новое количество попыток для капчи:")
+
+
+
+async def save_banned_words(update: Update, context: CallbackContext):
+    if not context.user_data.get('awaiting_banned_words'):
+        return
+
+    group_id = context.user_data.get('current_group')
+    if not group_id or group_id not in group_data:
+        await update.message.reply_text("Группа не найдена или не выбрана.")
+        return
+
+    banned_words = update.message.text.split(", ")
+    group_data[group_id]['banned_words'] = banned_words
+    context.user_data['awaiting_banned_words'] = False
+    await update.message.reply_text(
+        f"Запрещенные слова обновлены для группы {group_data[group_id]['group_name']}: {', '.join(banned_words)}"
+    )
 
 async def save_max_messages(update: Update, context: CallbackContext):
     if not context.user_data.get('awaiting_max_messages'):
@@ -442,22 +561,6 @@ async def save_mut(update: Update, context: CallbackContext):
     else:
         await update.message.reply_text("Неверный ввод. Попробуйте снова.")
 
-async def save_banned_words(update: Update, context: CallbackContext):
-    if not context.user_data.get('awaiting_banned_words'):
-        return
-
-    group_id = context.user_data.get('current_group')
-    if not group_id or group_id not in group_data:
-        await update.message.reply_text("Группа не найдена или не выбрана.")
-        return
-
-    banned_words = update.message.text.split(", ")
-    group_data[group_id]['banned_words'] = banned_words
-    context.user_data['awaiting_banned_words'] = False
-    await update.message.reply_text(
-        f"Запрещенные слова обновлены для группы {group_data[group_id]['group_name']}: {', '.join(banned_words)}"
-    )
-
 async def save_warn_grup(update: Update, context: CallbackContext):
 
     if not context.user_data.get('awaiting_warn_grup'):
@@ -477,6 +580,38 @@ async def save_warn_grup(update: Update, context: CallbackContext):
         context.user_data['awaiting_warn_grup'] = False
     except Exception as e:
         await update.message.reply_text(f"Ошибка: {str(e)}. Попробуйте снова.")
+
+async def save_captcha_timeout(update: Update, context: CallbackContext):
+    group_id = context.user_data.get('current_group')
+    if not group_id or group_id not in group_data:
+        await update.message.reply_text("Группа не найдена или не выбрана.")
+        return
+
+    try:
+        timeout = int(update.message.text.strip())
+        if timeout < 1:
+            raise ValueError("Время должно быть положительным числом.")
+        group_data[group_id]['CAPTCHA_TIMEOUT'] = timeout
+        context.user_data['awaiting_captcha_timeout'] = False
+        await update.message.reply_text(f"Время жизни капчи обновлено: {timeout} секунд.")
+    except ValueError as e:
+        await update.message.reply_text(f"Ошибка: {e}")
+
+async def save_captcha_attempts(update: Update, context: CallbackContext):
+    group_id = context.user_data.get('current_group')
+    if not group_id or group_id not in group_data:
+        await update.message.reply_text("Группа не найдена или не выбрана.")
+        return
+
+    try:
+        attempts = int(update.message.text.strip())
+        if attempts < 1:
+            raise ValueError("Количество попыток должно быть положительным числом.")
+        group_data[group_id]['CAPTCHA_ATTEMPTS'] = attempts
+        context.user_data['awaiting_captcha_attempts'] = False
+        await update.message.reply_text(f"Количество попыток капчи обновлено: {attempts}")
+    except ValueError as e:
+        await update.message.reply_text(f"Ошибка: {e}")
 
 
 
@@ -731,6 +866,10 @@ async def process_message(update: Update, context: CallbackContext):
         await save_mut(update, context)
     elif context.user_data.get('awaiting_warn_grup', False):
         await save_warn_grup(update, context)
+    elif context.user_data.get('awaiting_captcha_timeout', False):
+        await save_captcha_timeout(update, context)
+    elif context.user_data.get('awaiting_captcha_attempts', False):
+        await save_captcha_attempts(update, context)
     else:
         await handle_message(update, context)
 
@@ -767,6 +906,9 @@ async def main():
     application.add_handler(CallbackQueryHandler(set_warn_grup, pattern="^set_warn_grup_"))
     application.add_handler(CallbackQueryHandler(set_mut, pattern="^set_mut_"))
     application.add_handler(CallbackQueryHandler(captcha_callback, pattern="^captcha_"))
+    application.add_handler(CallbackQueryHandler(set_captcha_timeout, pattern="^set_captcha_timeout_"))
+    application.add_handler(CallbackQueryHandler(set_captcha_attempts, pattern="^set_captcha_attempts_"))
+    application.add_handler(CallbackQueryHandler(view_settings, pattern="^view_settings_"))
 
     application.add_handler(MessageHandler(filters.StatusUpdate.NEW_CHAT_MEMBERS, new_member))
 
