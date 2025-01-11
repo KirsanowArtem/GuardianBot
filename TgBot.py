@@ -94,11 +94,6 @@ async def start(update: Update, context: CallbackContext):
     chat_id = update.effective_chat.id
     user_id = update.effective_user.id
 
-    chat_member = await update.effective_chat.get_member(user_id)
-    if chat_member.status == 'creator':
-        await update.message.reply_text("Вы не можете быть ограничены, так как являетесь владельцем чата.")
-        return
-
     if update.message.chat.type not in ["group", "supergroup"]:
         await update.message.reply_text("Эта команда доступна только в группах.")
         return
@@ -126,49 +121,60 @@ async def start(update: Update, context: CallbackContext):
             'captcha_expiry': datetime.now(timezone.utc) + timedelta(hours=1)
         }
 
-        until_date = datetime.now(timezone.utc) + timedelta(hours=1)
-        await update.message.chat.restrict_member(
-            user_id,
-            ChatPermissions(can_send_messages=False),
-            until_date=until_date
-        )
+    chat_member = await update.effective_chat.get_member(user_id)
+    if chat_member.status == 'creator':
+        await update.message.reply_text("Вы не можете быть ограничены, так как являетесь владельцем чата.")
+        return
 
-        await send_captcha(update, context, chat_id, user_id)
+    until_date = datetime.now(timezone.utc) + timedelta(hours=1)
+    await update.message.chat.restrict_member(
+        user_id,
+        ChatPermissions(can_send_messages=False),
+        until_date=until_date
+    )
+    await send_captcha(update, context, chat_id, user_id)
 
-
-async def send_captcha(update: Update, context: CallbackContext, chat_id, user_id, message_id=None):
+async def send_captcha(update: Update, context: CallbackContext, chat_id, user_id):
     characters = string.ascii_lowercase + string.digits
     correct_text = ''.join(random.choices(characters, k=8))
     wrong_answers = [correct_text[:i] + random.choice(characters) + correct_text[i + 1:] for i in range(8)]
+
     options = wrong_answers + [correct_text]
     random.shuffle(options)
 
-    captcha_data[user_id] = {
-        'correct_text': correct_text,
-        'attempts': captcha_data[user_id]['attempts'] + 1 if user_id in captcha_data else 0,
-        'expiry': datetime.now(timezone.utc) + timedelta(hours=1)
-    }
-
-    if message_id:
-        try:
-            await context.bot.edit_message_caption(
-                chat_id=chat_id,
-                message_id=message_id,
-                caption=f"{correct_text}\nВыберите правильный вариант:",
-                reply_markup=InlineKeyboardMarkup([
-                    [InlineKeyboardButton(text=option, callback_data=f"captcha_{user_id}_{option}")] for option in options[:4]
-                ])
-            )
-        except Exception as e:
-            logging.error(f"Не удалось обновить сообщение капчи: {e}")
+    if user_id not in captcha_data:
+        captcha_data[user_id] = {
+            'correct_text': correct_text,
+            'attempts': 0,
+            'expiry': datetime.now(timezone.utc) + timedelta(hours=1)
+        }
     else:
-        await context.bot.send_message(
-            chat_id=chat_id,
-            text=f"{correct_text}\nВыберите правильный вариант:",
-            reply_markup=InlineKeyboardMarkup([
-                [InlineKeyboardButton(text=option, callback_data=f"captcha_{user_id}_{option}")] for option in options[:4]
-            ])
-        )
+        captcha_data[user_id]['correct_text'] = correct_text
+
+    image = Image.new('RGB', (400, 150), color='white')
+    draw = ImageDraw.Draw(image)
+
+    try:
+        font = ImageFont.truetype("DejaVuSans-Bold.ttf", 160)
+    except IOError:
+        font = ImageFont.load_default()
+
+    draw.text((50, 50), f"{correct_text}", font=font, fill='black')
+
+    image_stream = io.BytesIO()
+    image.save(image_stream, format='PNG')
+    image_stream.seek(0)
+
+    buttons = [[InlineKeyboardButton(text=option, callback_data=f"captcha_{user_id}_{option}")]
+               for option in options[:4]]
+    keyboard = InlineKeyboardMarkup(buttons)
+
+    await context.bot.send_photo(
+        chat_id=chat_id,
+        photo=image_stream,
+        caption="Выберите правильный вариант:",
+        reply_markup=keyboard
+    )
 
 async def captcha_callback(update: Update, context: CallbackContext):
     query = update.callback_query
@@ -184,11 +190,10 @@ async def captcha_callback(update: Update, context: CallbackContext):
 
     correct_text = captcha_data[user_id]['correct_text']
     attempts = captcha_data[user_id]['attempts']
-    print(attempts)
     expiry = captcha_data[user_id]['expiry']
 
     if datetime.now(timezone.utc) > expiry:
-        await captcha_remove_user(update, context, query.message.chat.id, user_id)
+        await captcha_ban_user(update, context, query.message.chat.id, user_id)
         del captcha_data[user_id]
         return
 
@@ -202,29 +207,21 @@ async def captcha_callback(update: Update, context: CallbackContext):
     else:
         attempts += 1
         captcha_data[user_id]['attempts'] = attempts
-        if selected_option != correct_text:
-            await send_captcha(update, context, query.message.chat.id, user_id, query.message.message_id)
-            await query.message.reply_text("Неправильный ответ. Попробуйте снова.")
-            return
-
         if attempts >= 5:
-            await captcha_remove_user(update, context, query.message.chat.id, user_id)
+            await captcha_ban_user(update, context, query.message.chat.id, user_id)
             del captcha_data[user_id]
         else:
             await query.message.reply_text("Неправильный ответ. Попробуйте снова.")
             await send_captcha(update, context, query.message.chat.id, user_id)
 
 
-async def captcha_remove_user(update: Update, context: CallbackContext, chat_id, user_id):
+
+
+async def captcha_ban_user(update: Update, context: CallbackContext, chat_id, user_id):
     await context.bot.ban_chat_member(chat_id, user_id)
     group_data[chat_id]['users'][user_id]['banned'] = True
     name = group_data[chat_id]['users'][user_id]['name']
     await context.bot.send_message(chat_id, f"Пользователь {name} удален из чата за неудачные попытки пройти капчу.")
-
-async def captcha_ban_user(update: Update, context: CallbackContext, chat_id, user_id):
-    await context.bot.kick_chat_member(chat_id, user_id)
-    group_data[chat_id]['users'][user_id]['banned'] = True
-    await context.bot.send_message(chat_id, f"Пользователь {user_id} забанен за неудачную попытку пройти капчу.")
 
 async def delete_captcha_message(context: CallbackContext, chat_id, message_id):
     try:
@@ -635,52 +632,6 @@ async def warn_user(update: Update, context: CallbackContext):
         target_user['banned'] = True
         await update.message.reply_text(f"Пользователь @{target_username} был забанен за 5 предупреждений.")
 
-async def view_users(update: Update, context: CallbackContext):
-    query = update.callback_query
-    await query.answer()
-
-    group_id = int(query.data.split("_")[2])
-    if group_id not in group_data:
-        await query.message.reply_text("Группа не найдена.")
-        return
-
-    users = group_data[group_id].get('users', {})
-    if not users:
-        await query.edit_message_text("В группе пока нет пользователей.")
-        return
-
-    response = f"Информация о пользователях в группе {group_data[group_id]['group_name']}:\n\n"
-    for user_id, info in users.items():
-        response += (f"Имя: {info['name']}"
-                     f"ID: {user_id}"
-                     f"Никнейм: {info['nickname']}"
-                     f"Номер: {info['number']}"
-                     f"Телеграм ID: {info['telegram_id']}"
-                     f"Замечания: {info['warnings']}"
-                     f"Забанен: {info['banned']}")
-
-    await query.edit_message_text(response)
-
-
-
-async def user_info(update: Update, context: CallbackContext):
-    user_id = update.effective_user.id
-    chat_id = update.effective_chat.id
-
-    if chat_id not in group_data or user_id not in group_data[chat_id]['users']:
-        await update.message.reply_text("Информация о вас в этой группе отсутствует.")
-        return
-
-    user_data = group_data[chat_id]['users'][user_id]
-    response = (f"Информация о пользователе:\n"
-                f"Имя: {user_data['name']}\n"
-                f"Никнейм: {user_data['nickname']}\n"
-                f"Номер: {user_data['number']}\n"
-                f"Telegram ID: {user_data['telegram_id']}\n"
-                f"Замечания: {user_data['warnings']}\n"
-                f"Забанен: {user_data['banned']}")
-    await update.message.reply_text(response)
-
 async def ban_user(update: Update, context: CallbackContext):
     chat_id = update.effective_chat.id
 
@@ -708,6 +659,54 @@ async def unban_user(update: Update, context: CallbackContext):
         await update.message.reply_text(f"Пользователь {group_data[chat_id]['users'][target_user_id]['name']} разбанен.")
     else:
         await update.message.reply_text("Пользователь не найден.")
+
+
+async def view_users(update: Update, context: CallbackContext):
+    query = update.callback_query
+    await query.answer()
+
+    group_id = int(query.data.split("_")[2])
+    if group_id not in group_data:
+        await query.message.reply_text("Группа не найдена.")
+        return
+
+    users = group_data[group_id].get('users', {})
+    if not users:
+        await query.edit_message_text("В группе пока нет пользователей.")
+        return
+
+    response = f"Информация о пользователях в группе {group_data[group_id]['group_name']}:\n\n"
+    for user_id, info in users.items():
+        response += (f"Имя: {info['name']}\n"
+                     f"ID: {user_id}\n"
+                     f"Никнейм: {info['nickname']}\n"
+                     f"Номер: {info['number']}\n"
+                     f"Телеграм ID: {info['telegram_id']}\n"
+                     f"Замечания: {info['warnings']}\n"
+                     f"Забанен: {info['banned']}\n\n")
+
+    await query.edit_message_text(response)
+
+
+
+async def user_info(update: Update, context: CallbackContext):
+    user_id = update.effective_user.id
+    chat_id = update.effective_chat.id
+
+    if chat_id not in group_data or user_id not in group_data[chat_id]['users']:
+        await update.message.reply_text("Информация о вас в этой группе отсутствует.")
+        return
+
+    user_data = group_data[chat_id]['users'][user_id]
+    response = (f"Информация о пользователе:\n"
+                f"Имя: {user_data['name']}\n"
+                f"Никнейм: {user_data['nickname']}\n"
+                f"Номер: {user_data['number']}\n"
+                f"Telegram ID: {user_data['telegram_id']}\n"
+                f"Замечания: {user_data['warnings']}\n"
+                f"Забанен: {user_data['banned']}\n\n")
+    await update.message.reply_text(response)
+
 
 async def send_error_message(application: Application, error: str, group_name: str, update: Update = None):
     error_message = f"Ошибка в группе {group_name} (ссылка: https://t.me/c/{str(ERROR_GROUP_ID)[4:]})\n\nОшибка: {error}"
