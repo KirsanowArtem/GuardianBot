@@ -119,7 +119,6 @@ async def start(update: Update, context: CallbackContext):
         group_data[chat_id]['users'][user_id] = {
             'name': update.effective_user.first_name or "Без имени",
             'nickname': update.effective_user.username or "Нет никнейма",
-            'number': None,
             'telegram_id': user_id,
             'warnings': 0,
             'banned': False,
@@ -160,7 +159,7 @@ async def send_captcha(update: Update, context: CallbackContext, chat_id, user_i
         captcha_data[user_id] = {
             'correct_text': correct_text,
             'attempts': 0,
-            'expiry': datetime.now(timezone.utc) + timedelta(hours=1),
+            'expiry': datetime.now(timezone.utc) + timedelta(seconds=group_data[chat_id].get("CAPTCHA_TIMEOUT", 3600)),
             'captcha_message_id': None,
         }
     else:
@@ -183,78 +182,78 @@ async def send_captcha(update: Update, context: CallbackContext, chat_id, user_i
     buttons = [[InlineKeyboardButton(text=option, callback_data=f"captcha_{user_id}_{option}")] for option in options]
     keyboard = InlineKeyboardMarkup(buttons)
 
+    user_name = f"@{group_data[chat_id]['users'][user_id]['nickname']}" if group_data[chat_id]['users'][user_id][
+        'nickname'] else group_data[chat_id]['users'][user_id]['name']
+
     message = await context.bot.send_photo(
         chat_id=chat_id,
         photo=image_stream,
-        caption="Выберите правильный вариант:",
+        caption=f"{user_name}, выберите правильный вариант:",
         reply_markup=keyboard
     )
 
     captcha_data[user_id]['captcha_message_id'] = message.message_id
 
+
 async def captcha_callback(update: Update, context: CallbackContext):
     query = update.callback_query
-    await query.answer()
+    user_id = int(query.data.split("_")[1])
+    selected_option = query.data.split("_")[2]
+    chat_id = query.message.chat.id
+    current_user_id = query.from_user.id
 
-    data = query.data.split("_")
-    user_id = int(data[1])
-    selected_option = data[2]
-
-    if user_id not in captcha_data:
-        await query.message.delete()
-        await context.bot.send_message(
-            chat_id=query.message.chat.id,
-            text="Капча устарела. Попробуйте снова."
-        )
+    if current_user_id != user_id:
+        if current_user_id in captcha_data:
+            await query.answer("Это не ваша капча. Пройдите свою.")
+            await query.message.reply_text(
+                f"@{query.from_user.username}, пожалуйста, пройдите свою капчу."
+            )
+        else:
+            chat_member = await context.bot.get_chat_member(chat_id, current_user_id)
+            if chat_member.status not in ["administrator", "creator"]:
+                await captcha_ban_user(update, context, chat_id, current_user_id, timeout_expired=False)
         return
 
-    correct_text = captcha_data[user_id]['correct_text']
-    attempts = captcha_data[user_id]['attempts']
-    expiry = captcha_data[user_id]['expiry']
-
-    if datetime.now(timezone.utc) > expiry:
-        await query.message.delete()
-        await captcha_ban_user(update, context, query.message.chat.id, user_id)
-        del captcha_data[user_id]
+    if current_user_id not in captcha_data:
+        await query.answer("Вы уже прошли капчу.")
         return
 
-    if selected_option == correct_text:
+    captcha_info = captcha_data[current_user_id]
+    if datetime.now(timezone.utc) > captcha_info['expiry']:
+        await query.message.delete()
+        await captcha_ban_user(update, context, chat_id, current_user_id, timeout_expired=True)
+        del captcha_data[current_user_id]
+        return
 
+    if selected_option == captcha_info['correct_text']:
         await query.message.delete()
         await context.bot.send_message(
-            chat_id=query.message.chat.id,
+            chat_id=chat_id,
             text="Капча пройдена! Мут снят."
         )
         await query.message.chat.restrict_member(
-            user_id,
+            current_user_id,
             ChatPermissions(can_send_messages=True)
         )
-        del captcha_data[user_id]
+        del captcha_data[current_user_id]
     else:
-        attempts += 1
-        captcha_data[user_id]['attempts'] = attempts
-        if attempts >= 5:
+        captcha_info['attempts'] += 1
+        if captcha_info['attempts'] >= group_data[chat_id].get("CAPTCHA_ATTEMPTS", 5):
             await query.message.delete()
-            await captcha_ban_user(update, context, query.message.chat.id, user_id)
-            del captcha_data[user_id]
+            await captcha_ban_user(update, context, chat_id, current_user_id, timeout_expired=False)
+            del captcha_data[current_user_id]
         else:
             await query.message.delete()
-            await context.bot.send_message(
-                chat_id=query.message.chat.id,
-                text="Неправильный ответ. Попробуйте снова."
-            )
-            await send_captcha(update, context, query.message.chat.id, user_id)
+            await send_captcha(update, context, chat_id, current_user_id)
 
 
 async def captcha_ban_user(update: Update, context: CallbackContext, chat_id, user_id, timeout_expired=False):
     await context.bot.ban_chat_member(chat_id, user_id)
     group_data[chat_id]['users'][user_id]['banned'] = True
     name = group_data[chat_id]['users'][user_id]['name']
-
     reason = "превышено время ожидания" if timeout_expired else "превышено количество попыток"
     ban_message = (
-        f"Пользователь {name} (@{group_data[chat_id]['users'][user_id]['nickname']}) удален из чата за неудачные попытки пройти капчу.\n"
-        f"Причина: {reason}.\n"
+        f"Пользователь {name} удален из чата за {reason}.\n"
         f"#CAPTCHA_BAN\n"
         f"#BAN"
     )
@@ -262,23 +261,6 @@ async def captcha_ban_user(update: Update, context: CallbackContext, chat_id, us
     special_group_id = group_data[chat_id].get("SPECIAL_GROUP_ID", -1002483663129)
     await context.bot.send_message(special_group_id, ban_message)
     await context.bot.send_message(chat_id, f"Пользователь {name} удален из чата за {reason}.")
-
-async def delete_captcha_message(context: CallbackContext, chat_id, message_id):
-    try:
-        await context.bot.delete_message(chat_id, message_id)
-    except Exception as e:
-        logging.error(f"Не удалось удалить сообщение с капчей: {e}")
-
-async def captcha_timeout_check(context: CallbackContext, user_id):
-    while user_id in captcha_data:
-        expiry = captcha_data[user_id]['expiry']
-        if datetime.now(timezone.utc) >= expiry:
-            chat_id = captcha_data[user_id]['chat_id']
-            await captcha_ban_user(None, context, chat_id, user_id, timeout_expired=True)
-            del captcha_data[user_id]
-            break
-        await asyncio.sleep(5)  # Проверяем каждые 5 секунд
-
 
 
 
@@ -308,7 +290,6 @@ async def new_member(update: Update, context: CallbackContext):
             group_data[chat_id]['users'][user_id] = {
                 'name': member.first_name or "Без имени",
                 'nickname': member.username or "Нет никнейма",
-                'number': None,
                 'telegram_id': user_id,
                 'warnings': 0,
                 'banned': False,
@@ -680,7 +661,7 @@ async def handle_spam(update: Update, context: CallbackContext, user_id: int):
                 f"Пользователь {update.effective_user.first_name} "
                 f"(@{update.effective_user.username}) был забанен за 5 предупреждений и спам.\n"
                 f"(больше {MAX_MESSAGES_PER_SECOND} сообщений за секунду).\n"
-                f"Номер пользователя: {user_data.get('number', 'Не задан')}"
+                f"ID пользователя: {user_data.get('telegram_id', 'Не известен')}"
                 f"#Ban\n"
                 f"#Spam\n"
             )
@@ -690,7 +671,7 @@ async def handle_spam(update: Update, context: CallbackContext, user_id: int):
                 f"Пользователь {update.effective_user.first_name} "
                 f"(@{update.effective_user.username}) получил мут на 1 минуту за спам "
                 f"(больше {MAX_MESSAGES_PER_SECOND} сообщений за секунду).\n"
-                f"Номер пользователя: {user_data.get('number', 'Не задан')}"
+                f"ID пользователя: {user_data.get('telegram_id', 'Не известен')}"
                 f"#Spam"
             )
 
@@ -718,7 +699,7 @@ async def check_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"Пользователь {update.effective_user.first_name} "
             f"(@{update.effective_user.username}) был забанен за 5 предупреждений.\n"
             f"Сообщение:\n{message_text}\n"
-            f"Номер пользователя: {user_data.get('number', 'Не задан')}"
+            f"ID пользователя: {user_data.get('telegram_id', 'Не известен')}"
             f"#Ban\n"
         )
 
@@ -731,7 +712,7 @@ async def check_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"(@{update.effective_user.username}) использовал запрещенное слово: {update.message.text}.\n"
             f"Всего предупреждений: {warnings_count}.\n"
             f"Сообщение:\n{message_text}\n"
-            f"Номер пользователя: {user_data.get('number', 'Не задан')}"
+            f"ID пользователя: {user_data.get('telegram_id', 'Не известен')}"
             f"#Warn\n"
         )
         await context.bot.send_message(SPECIAL_GROUP_ID, violation_message)
@@ -815,8 +796,7 @@ async def view_users(update: Update, context: CallbackContext):
         response += (f"Имя: {info['name']}\n"
                      f"ID: {user_id}\n"
                      f"Никнейм: {info['nickname']}\n"
-                     f"Номер: {info['number']}\n"
-                     f"Телеграм ID: {info['telegram_id']}\n"
+                     f"ID: {info['telegram_id']}\n"
                      f"Замечания: {info['warnings']}\n"
                      f"Забанен: {info['banned']}\n\n")
 
