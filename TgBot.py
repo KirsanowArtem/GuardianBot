@@ -165,7 +165,7 @@ async def send_captcha(update: Update, context: CallbackContext, chat_id, user_i
     else:
         captcha_data[user_id]['correct_text'] = correct_text
 
-    image = Image.new('RGB', (400, 150), color='white')
+    image = Image.new('RGB', (200, 75), color='white')
     draw = ImageDraw.Draw(image)
 
     try:
@@ -320,42 +320,185 @@ async def new_member(update: Update, context: CallbackContext):
 
 
 
-
 async def my_groups(update: Update, context: CallbackContext):
-    if update.message.chat.type != "private":
-        await update.message.reply_text("Эта команда доступна только в личных сообщениях с ботом.")
-        return
-
+    """Отображает группы с разделением на роли."""
     user_id = update.effective_user.id
 
+    # Получение групп, где пользователь является администратором или владельцем
+    admin_groups = [
+        chat_id for chat_id, data in group_data.items()
+        if user_id in data['users']
+        and (await context.bot.get_chat_member(chat_id, user_id)).status in ['administrator', 'creator']
+    ]
+
+    # Получение групп, где пользователь обычный участник
     user_groups = [
         chat_id for chat_id, data in group_data.items()
         if user_id in data['users']
+        and (await context.bot.get_chat_member(chat_id, user_id)).status not in ['administrator', 'creator']
     ]
 
-    if not user_groups:
-        await update.message.reply_text("Вы не добавлены ни в одну группу.")
-        return
-
     keyboard = [
-        [InlineKeyboardButton(group_data[chat_id]['group_name'], callback_data=f"group_{chat_id}")]
-        for chat_id in user_groups
+        [InlineKeyboardButton("Администратор", callback_data="role_admin")],
+        [InlineKeyboardButton("Пользователь", callback_data="role_user")],
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
 
-    await update.message.reply_text("Ваши группы:", reply_markup=reply_markup)
+    await update.message.reply_text("Выберите свою роль:", reply_markup=reply_markup)
 
-async def group_settings(update: Update, context: CallbackContext):
+
+async def role_handler(update: Update, context: CallbackContext):
+    """Обрабатывает выбор роли."""
+    query = update.callback_query
+    await query.answer()
+
+    user_id = query.from_user.id
+    role = query.data.split("_")[1]
+
+    if role == "admin":
+        admin_groups = [
+            chat_id for chat_id, data in group_data.items()
+            if user_id in data['users']
+            and (await context.bot.get_chat_member(chat_id, user_id)).status in ['administrator', 'creator']
+        ]
+
+        if not admin_groups:
+            await query.edit_message_text("У вас нет администраторских групп.")
+            return
+
+        keyboard = [
+            [InlineKeyboardButton(group_data[chat_id]['group_name'], callback_data=f"admin_group_{chat_id}")]
+            for chat_id in admin_groups
+        ]
+    elif role == "user":
+        user_groups = [
+            chat_id for chat_id, data in group_data.items()
+            if user_id in data['users']
+            and (await context.bot.get_chat_member(chat_id, user_id)).status not in ['administrator', 'creator']
+        ]
+
+        if not user_groups:
+            await query.edit_message_text("У вас нет пользовательских групп.")
+            return
+
+        keyboard = [
+            [InlineKeyboardButton(group_data[chat_id]['group_name'], callback_data=f"user_group_{chat_id}")]
+            for chat_id in user_groups
+        ]
+    else:
+        await query.edit_message_text("Неверный выбор роли.")
+        return
+
+    keyboard.append([InlineKeyboardButton("Назад", callback_data="go_back")])
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    await query.edit_message_text("Выберите группу:", reply_markup=reply_markup)
+
+
+async def group_details(update: Update, context: CallbackContext):
+    """Обрабатывает выбор группы."""
+    query = update.callback_query
+    await query.answer()
+
+    group_id = int(query.data.split("_")[2])
+    role = query.data.split("_")[0]
+
+    if role == "admin":
+        keyboard = [
+            [InlineKeyboardButton("Управление пользователями", callback_data=f"user_management_group_{group_id}")],
+            [InlineKeyboardButton("Фильтры и ограничения", callback_data=f"filters_limits_group_{group_id}")],
+            [InlineKeyboardButton("Настройка капчи", callback_data=f"captcha_settings_group_{group_id}")],
+            [InlineKeyboardButton("Настройки группы", callback_data=f"group_settings_group_{group_id}")],
+            [InlineKeyboardButton("Назад", callback_data="go_back")],
+        ]
+
+    elif role == "user":
+        keyboard = [
+            [InlineKeyboardButton("Правила", callback_data=f"rules_{group_id}")],
+            [InlineKeyboardButton("Обратная связь", callback_data=f"feedback_{group_id}")],
+            [InlineKeyboardButton("Назад", callback_data="role_user")]
+        ]
+    else:
+        await query.edit_message_text("Ошибка выбора группы.")
+        return
+
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    await query.edit_message_text(f"Группа: {group_data[group_id]['group_name']}", reply_markup=reply_markup)
+
+
+async def rules(update: Update, context: CallbackContext):
+    """Отображает правила группы."""
     query = update.callback_query
     await query.answer()
 
     group_id = int(query.data.split("_")[1])
+    rules = group_data[group_id].get("rules", "Правила не заданы.")
+
+    await query.edit_message_text(f"Правила группы:\n{rules}")
+
+
+async def feedback(update: Update, context: CallbackContext):
+    """Отображает обратную связь группы."""
+    query = update.callback_query
+    await query.answer()
+
+    group_id = int(query.data.split("_")[1])
+    feedback_text = group_data[group_id].get("feedback", "Обратная связь не задана.")
+
+    await query.edit_message_text(f"Обратная связь:\n{feedback_text}")
+
+
+async def go_back(update: Update, context: CallbackContext):
+    query = update.callback_query
+    await query.answer()
+
+    # Проверяем формат callback_data
+    data_parts = query.data.split("_")
+    print(data_parts)
+    if len(data_parts) != 3 or data_parts[0] != "go" or data_parts[1] != "back":
+        await query.message.reply_text("Некорректный формат данных. Попробуйте снова.")
+        return
+
+    group_id = int(data_parts[2])  # Извлекаем ID группы
     if group_id not in group_data:
         await query.message.reply_text("Группа не найдена.")
         return
 
     group_name = group_data[group_id]['group_name']
 
+    # Кнопки главного меню группы
+    keyboard = [
+        [InlineKeyboardButton("Управление пользователями", callback_data=f"user_management_group_{group_id}")],
+        [InlineKeyboardButton("Фильтры и ограничения", callback_data=f"filters_limits_group_{group_id}")],
+        [InlineKeyboardButton("Настройка капчи", callback_data=f"captcha_settings_group_{group_id}")],
+        [InlineKeyboardButton("Настройки группы", callback_data=f"group_settings_group_{group_id}")],
+        [InlineKeyboardButton("Назад", callback_data="role_admin")],  # Возврат к выбору ролей
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+
+    # Возврат в главное меню группы
+    await query.edit_message_text(f"Группа: {group_name}", reply_markup=reply_markup)
+
+
+async def group_settings(update: Update, context: CallbackContext):
+    query = update.callback_query
+    await query.answer()
+
+    # Разделение данных callback_data
+    data_parts = query.data.split("_")
+    print(data_parts)
+    print(1010010101)
+    if len(data_parts) != 4 or data_parts[0] != "group" or data_parts[1] != "settings":
+        await query.message.reply_text("Некорректный формат данных. Попробуйте снова.")
+        return
+
+    group_id = int(data_parts[-1])  # Получаем ID группы
+    if group_id not in group_data:
+        await query.message.reply_text("Группа не найдена.")
+        return
+
+    group_name = group_data[group_id]['group_name']
+
+    # Формируем кнопки настроек группы
     keyboard = [
         [InlineKeyboardButton("Просмотреть всех пользователей", callback_data=f"view_users_{group_id}")],
         [InlineKeyboardButton("Настроить запрещенные слова", callback_data=f"banned_words_{group_id}")],
@@ -364,7 +507,8 @@ async def group_settings(update: Update, context: CallbackContext):
         [InlineKeyboardButton("Настроить группу с предупреждениями и банами", callback_data=f"set_warn_grup_{group_id}")],
         [InlineKeyboardButton("Изменить время жизни капчи", callback_data=f"set_captcha_timeout_{group_id}")],
         [InlineKeyboardButton("Изменить количество попыток капчи", callback_data=f"set_captcha_attempts_{group_id}")],
-        [InlineKeyboardButton("Просмотреть настройки группы", callback_data=f"view_settings_{group_id}")]
+        [InlineKeyboardButton("Просмотреть настройки группы", callback_data=f"view_settings_{group_id}")],
+        [InlineKeyboardButton("Назад", callback_data=f"go_back_{group_id}")],
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
 
@@ -374,22 +518,64 @@ async def view_settings(update: Update, context: CallbackContext):
     query = update.callback_query
     await query.answer()
 
-    group_id = int(query.data.split("_")[2])
-    if group_id not in group_data:
-        await query.message.reply_text("Группа не найдена.")
-        return
-
+    group_id = int(query.data.split("_")[-1])
     settings = group_data[group_id]
     response = (
-        f"Настройки группы '{settings['group_name']}':\n"
+        f"Настройки группы {settings['group_name']}:\n"
         f"- Лимит сообщений в секунду: {settings['MAX_MESSAGES_PER_SECOND']}\n"
-        f"- Время временного мута (сек): {settings['MUT_SECONDS']}\n"
-        f"- Время жизни капчи (сек): {settings.get('CAPTCHA_TIMEOUT', 3600)}\n"
+        f"- Время временного мута: {settings['MUT_SECONDS']} секунд\n"
+        f"- Время жизни капчи: {settings.get('CAPTCHA_TIMEOUT', 3600)} секунд\n"
         f"- Количество попыток капчи: {settings.get('CAPTCHA_ATTEMPTS', 5)}\n"
         f"- ID группы с предупреждениями: {settings['SPECIAL_GROUP_ID']}\n"
         f"- Запрещенные слова: {', '.join(settings['banned_words']) if settings['banned_words'] else 'Нет'}"
     )
-    await query.message.reply_text(response)
+    keyboard = [[InlineKeyboardButton("Назад", callback_data=f"group_settings_group_{group_id}")]]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+
+    await query.edit_message_text(response, reply_markup=reply_markup)
+
+async def user_management(update: Update, context: CallbackContext):
+    query = update.callback_query
+    await query.answer()
+
+    group_id = int(query.data.split("_")[-1])
+
+    keyboard = [
+        [InlineKeyboardButton("Просмотреть всех пользователей", callback_data=f"view_users_{group_id}")],
+        [InlineKeyboardButton("Назад", callback_data=f"group_settings_group_{group_id}")],
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    await query.edit_message_text("Управление пользователями:", reply_markup=reply_markup)
+
+async def filters_limits(update: Update, context: CallbackContext):
+    query = update.callback_query
+    await query.answer()
+
+    group_id = int(query.data.split("_")[-1])
+
+    keyboard = [
+        [InlineKeyboardButton("Настроить запрещенные слова", callback_data=f"banned_words_{group_id}")],
+        [InlineKeyboardButton("Настроить лимит сообщений в секунду", callback_data=f"set_max_messages_{group_id}")],
+        [InlineKeyboardButton("Назад", callback_data=f"group_settings_group_{group_id}")],
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    await query.edit_message_text("Фильтры и ограничения:", reply_markup=reply_markup)
+
+async def captcha_settings(update: Update, context: CallbackContext):
+    query = update.callback_query
+    await query.answer()
+
+    group_id = int(query.data.split("_")[-1])
+
+    keyboard = [
+        [InlineKeyboardButton("Изменить время жизни капчи", callback_data=f"set_captcha_timeout_{group_id}")],
+        [InlineKeyboardButton("Изменить количество попыток капчи", callback_data=f"set_captcha_attempts_{group_id}")],
+        [InlineKeyboardButton("Назад", callback_data=f"group_settings_group_{group_id}")],
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    await query.edit_message_text("Настройки капчи:", reply_markup=reply_markup)
+
+
 
 
 async def set_banned_words(update: Update, context: CallbackContext):
@@ -593,6 +779,23 @@ async def save_captcha_attempts(update: Update, context: CallbackContext):
         await update.message.reply_text(f"Количество попыток капчи обновлено: {attempts}")
     except ValueError as e:
         await update.message.reply_text(f"Ошибка: {e}")
+
+
+async def process_message(update: Update, context: CallbackContext):
+    if context.user_data.get('awaiting_banned_words', False):
+        await save_banned_words(update, context)
+    elif context.user_data.get('awaiting_max_messages', False):
+        await save_max_messages(update, context)
+    elif context.user_data.get('awaiting_mut', False):
+        await save_mut(update, context)
+    elif context.user_data.get('awaiting_warn_grup', False):
+        await save_warn_grup(update, context)
+    elif context.user_data.get('awaiting_captcha_timeout', False):
+        await save_captcha_timeout(update, context)
+    elif context.user_data.get('awaiting_captcha_attempts', False):
+        await save_captcha_attempts(update, context)
+    else:
+        await handle_message(update, context)
 
 
 
@@ -837,21 +1040,6 @@ async def send_error_message(application: Application, error: str, group_name: s
     await application.bot.send_message(ERROR_GROUP_ID, error_message)
 
 
-async def process_message(update: Update, context: CallbackContext):
-    if context.user_data.get('awaiting_banned_words', False):
-        await save_banned_words(update, context)
-    elif context.user_data.get('awaiting_max_messages', False):
-        await save_max_messages(update, context)
-    elif context.user_data.get('awaiting_mut', False):
-        await save_mut(update, context)
-    elif context.user_data.get('awaiting_warn_grup', False):
-        await save_warn_grup(update, context)
-    elif context.user_data.get('awaiting_captcha_timeout', False):
-        await save_captcha_timeout(update, context)
-    elif context.user_data.get('awaiting_captcha_attempts', False):
-        await save_captcha_attempts(update, context)
-    else:
-        await handle_message(update, context)
 
 
 async def handle_callback_query(update: Update, context: CallbackContext):
@@ -879,16 +1067,18 @@ async def main():
     application.add_handler(CommandHandler("unban", unban_user))
     application.add_handler(CommandHandler("warn", warn_user))
 
-    application.add_handler(CallbackQueryHandler(group_settings, pattern="^group_"))
-    application.add_handler(CallbackQueryHandler(view_users, pattern="^view_users_"))
-    application.add_handler(CallbackQueryHandler(set_banned_words, pattern="^banned_words_"))
-    application.add_handler(CallbackQueryHandler(set_max_messages, pattern="^set_max_messages_"))
-    application.add_handler(CallbackQueryHandler(set_warn_grup, pattern="^set_warn_grup_"))
-    application.add_handler(CallbackQueryHandler(set_mut, pattern="^set_mut_"))
-    application.add_handler(CallbackQueryHandler(captcha_callback, pattern="^captcha_"))
-    application.add_handler(CallbackQueryHandler(set_captcha_timeout, pattern="^set_captcha_timeout_"))
-    application.add_handler(CallbackQueryHandler(set_captcha_attempts, pattern="^set_captcha_attempts_"))
-    application.add_handler(CallbackQueryHandler(view_settings, pattern="^view_settings_"))
+    application.add_handler(CallbackQueryHandler(user_management, pattern="^user_management_group_"))
+    application.add_handler(CallbackQueryHandler(filters_limits, pattern="^filters_limits_group_"))
+    application.add_handler(CallbackQueryHandler(captcha_settings, pattern="^captcha_settings_group_"))
+    application.add_handler(CallbackQueryHandler(view_settings, pattern="^view_settings_group_"))
+
+
+    application.add_handler(CallbackQueryHandler(group_settings, pattern="^group_settings_group_"))
+    application.add_handler(CallbackQueryHandler(go_back, pattern="^go_back_"))
+    application.add_handler(CallbackQueryHandler(role_handler, pattern="^role_"))
+    application.add_handler(CallbackQueryHandler(group_details, pattern="^(admin|user)_group_"))
+    application.add_handler(CallbackQueryHandler(rules, pattern="^rules_"))
+    application.add_handler(CallbackQueryHandler(feedback, pattern="^feedback_"))
 
     application.add_handler(MessageHandler(filters.StatusUpdate.NEW_CHAT_MEMBERS, new_member))
 
