@@ -393,36 +393,39 @@ async def role_handler(update: Update, context: CallbackContext):
     reply_markup = InlineKeyboardMarkup(keyboard)
     await query.edit_message_text("Выберите группу:", reply_markup=reply_markup)
 
-
-async def group_details(update: Update, context: CallbackContext):
-    """Обрабатывает выбор группы."""
+async def group_settings(update: Update, context: CallbackContext):
     query = update.callback_query
     await query.answer()
 
-    group_id = int(query.data.split("_")[2])
-    role = query.data.split("_")[0]
-
-    if role == "admin":
-        keyboard = [
-            [InlineKeyboardButton("Управление пользователями", callback_data=f"user_management_group_{group_id}")],
-            [InlineKeyboardButton("Фильтры и ограничения", callback_data=f"filters_limits_group_{group_id}")],
-            [InlineKeyboardButton("Настройка капчи", callback_data=f"captcha_settings_group_{group_id}")],
-            [InlineKeyboardButton("Настройки группы", callback_data=f"group_settings_group_{group_id}")],
-            [InlineKeyboardButton("Назад", callback_data="go_back")],
-        ]
-
-    elif role == "user":
-        keyboard = [
-            [InlineKeyboardButton("Правила", callback_data=f"rules_{group_id}")],
-            [InlineKeyboardButton("Обратная связь", callback_data=f"feedback_{group_id}")],
-            [InlineKeyboardButton("Назад", callback_data="role_user")]
-        ]
-    else:
-        await query.edit_message_text("Ошибка выбора группы.")
+    # Разделение данных callback_data
+    data_parts = query.data.split("_")
+    if len(data_parts) != 4 or data_parts[0] != "group" or data_parts[1] != "settings":
+        await query.message.reply_text("Некорректный формат данных. Попробуйте снова.")
         return
 
+    group_id = int(data_parts[-1])  # Получаем ID группы
+    if group_id not in group_data:
+        await query.message.reply_text("Группа не найдена.")
+        return
+
+    group_name = group_data[group_id]['group_name']
+
+    # Формируем кнопки настроек группы
+    keyboard = [
+        [InlineKeyboardButton("Просмотреть всех пользователей", callback_data=f"view_users_{group_id}")],
+        [InlineKeyboardButton("Настроить запрещенные слова", callback_data=f"banned_words_{group_id}")],
+        [InlineKeyboardButton("Настроить лимит сообщений в секунду", callback_data=f"set_max_messages_{group_id}")],
+        [InlineKeyboardButton("Настроить временный мут", callback_data=f"set_mut_{group_id}")],
+        [InlineKeyboardButton("Настроить группу с предупреждениями и банами", callback_data=f"set_warn_grup_{group_id}")],
+        [InlineKeyboardButton("Изменить время жизни капчи", callback_data=f"set_captcha_timeout_{group_id}")],
+        [InlineKeyboardButton("Изменить количество попыток капчи", callback_data=f"set_captcha_attempts_{group_id}")],
+        [InlineKeyboardButton("Просмотреть настройки группы", callback_data=f"view_settings_{group_id}")],
+        [InlineKeyboardButton("Назад", callback_data=f"go_back_{group_id}")],
+    ]
     reply_markup = InlineKeyboardMarkup(keyboard)
-    await query.edit_message_text(f"Группа: {group_data[group_id]['group_name']}", reply_markup=reply_markup)
+
+    # Используем функцию для проверки и редактирования
+    await edit_message_if_needed(query, f"Настройки группы: {group_name}", reply_markup)
 
 
 async def rules(update: Update, context: CallbackContext):
@@ -451,9 +454,7 @@ async def go_back(update: Update, context: CallbackContext):
     query = update.callback_query
     await query.answer()
 
-    # Проверяем формат callback_data
     data_parts = query.data.split("_")
-    print(data_parts)
     if len(data_parts) != 3 or data_parts[0] != "go" or data_parts[1] != "back":
         await query.message.reply_text("Некорректный формат данных. Попробуйте снова.")
         return
@@ -465,54 +466,62 @@ async def go_back(update: Update, context: CallbackContext):
 
     group_name = group_data[group_id]['group_name']
 
-    # Кнопки главного меню группы
     keyboard = [
         [InlineKeyboardButton("Управление пользователями", callback_data=f"user_management_group_{group_id}")],
         [InlineKeyboardButton("Фильтры и ограничения", callback_data=f"filters_limits_group_{group_id}")],
         [InlineKeyboardButton("Настройка капчи", callback_data=f"captcha_settings_group_{group_id}")],
         [InlineKeyboardButton("Настройки группы", callback_data=f"group_settings_group_{group_id}")],
-        [InlineKeyboardButton("Назад", callback_data="role_admin")],  # Возврат к выбору ролей
+        [InlineKeyboardButton("Назад", callback_data="role_admin")],
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
 
-    # Возврат в главное меню группы
-    await query.edit_message_text(f"Группа: {group_name}", reply_markup=reply_markup)
+    await edit_message_if_needed(query, f"Группа: {group_name}", reply_markup)
+
+async def edit_message_if_needed(query, new_text, new_reply_markup):
+    """Редактирует сообщение только если его содержимое или клавиатура изменились."""
+    current_text = query.message.text
+    current_reply_markup = query.message.reply_markup
+
+    # Проверяем, изменились ли текст или разметка
+    if current_text == new_text and current_reply_markup == new_reply_markup:
+        return  # Ничего не делаем, если текст и клавиатура не изменились
+
+    # Выполняем редактирование
+    await query.edit_message_text(new_text, reply_markup=new_reply_markup)
 
 
-async def group_settings(update: Update, context: CallbackContext):
+async def group_details(update: Update, context: CallbackContext):
     query = update.callback_query
     await query.answer()
 
-    # Разделение данных callback_data
-    data_parts = query.data.split("_")
-    print(data_parts)
-    print(1010010101)
-    if len(data_parts) != 4 or data_parts[0] != "group" or data_parts[1] != "settings":
-        await query.message.reply_text("Некорректный формат данных. Попробуйте снова.")
+    group_id = int(query.data.split("_")[2])
+    role = query.data.split("_")[0]
+
+    # Сохраняем текущее меню
+    context.user_data['menu_history'] = context.user_data.get('menu_history', [])
+    context.user_data['menu_history'].append('group_details')
+
+    if role == "admin":
+        keyboard = [
+            [InlineKeyboardButton("Управление пользователями", callback_data=f"user_management_group_{group_id}")],
+            [InlineKeyboardButton("Фильтры и ограничения", callback_data=f"filters_limits_group_{group_id}")],
+            [InlineKeyboardButton("Настройка капчи", callback_data=f"captcha_settings_group_{group_id}")],
+            [InlineKeyboardButton("Настройки группы", callback_data=f"group_settings_group_{group_id}")],
+            [InlineKeyboardButton("Назад", callback_data=f"go_back_{group_id}")],
+        ]
+
+    elif role == "user":
+        keyboard = [
+            [InlineKeyboardButton("Правила", callback_data=f"rules_{group_id}")],
+            [InlineKeyboardButton("Обратная связь", callback_data=f"feedback_{group_id}")],
+            [InlineKeyboardButton("Назад", callback_data="role_user")]
+        ]
+    else:
+        await query.edit_message_text("Ошибка выбора группы.")
         return
 
-    group_id = int(data_parts[-1])  # Получаем ID группы
-    if group_id not in group_data:
-        await query.message.reply_text("Группа не найдена.")
-        return
-
-    group_name = group_data[group_id]['group_name']
-
-    # Формируем кнопки настроек группы
-    keyboard = [
-        [InlineKeyboardButton("Просмотреть всех пользователей", callback_data=f"view_users_{group_id}")],
-        [InlineKeyboardButton("Настроить запрещенные слова", callback_data=f"banned_words_{group_id}")],
-        [InlineKeyboardButton("Настроить лимит сообщений в секунду", callback_data=f"set_max_messages_{group_id}")],
-        [InlineKeyboardButton("Настроить временный мут", callback_data=f"set_mut_{group_id}")],
-        [InlineKeyboardButton("Настроить группу с предупреждениями и банами", callback_data=f"set_warn_grup_{group_id}")],
-        [InlineKeyboardButton("Изменить время жизни капчи", callback_data=f"set_captcha_timeout_{group_id}")],
-        [InlineKeyboardButton("Изменить количество попыток капчи", callback_data=f"set_captcha_attempts_{group_id}")],
-        [InlineKeyboardButton("Просмотреть настройки группы", callback_data=f"view_settings_{group_id}")],
-        [InlineKeyboardButton("Назад", callback_data=f"go_back_{group_id}")],
-    ]
     reply_markup = InlineKeyboardMarkup(keyboard)
-
-    await query.edit_message_text(f"Настройки группы: {group_name}", reply_markup=reply_markup)
+    await query.edit_message_text(f"Группа: {group_data[group_id]['group_name']}", reply_markup=reply_markup)
 
 async def view_settings(update: Update, context: CallbackContext):
     query = update.callback_query
