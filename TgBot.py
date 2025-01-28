@@ -202,7 +202,6 @@ async def send_captcha(update: Update, context: CallbackContext, chat_id, user_i
 
     captcha_data[user_id]['captcha_message_id'] = message.message_id
 
-
 async def captcha_callback(update: Update, context: CallbackContext):
     query = update.callback_query
     user_id = int(query.data.split("_")[1])
@@ -254,7 +253,6 @@ async def captcha_callback(update: Update, context: CallbackContext):
             await query.message.delete()
             await send_captcha(update, context, chat_id, current_user_id)
 
-
 async def captcha_ban_user(update: Update, context: CallbackContext, chat_id, user_id, timeout_expired=False):
     await context.bot.ban_chat_member(chat_id, user_id)
     group_data[chat_id]['users'][user_id]['banned'] = True
@@ -269,10 +267,6 @@ async def captcha_ban_user(update: Update, context: CallbackContext, chat_id, us
     special_group_id = group_data[chat_id].get("SPECIAL_GROUP_ID", -1002483663129)
     await context.bot.send_message(special_group_id, ban_message)
     await context.bot.send_message(chat_id, f"Пользователь {name} удален из чата за {reason}.")
-
-
-
-
 
 async def new_member(update: Update, context: CallbackContext):
     chat_id = update.effective_chat.id
@@ -313,14 +307,6 @@ async def new_member(update: Update, context: CallbackContext):
         )
 
         await send_captcha(update, context, chat_id, user_id)
-
-
-
-
-
-
-
-
 
 
 
@@ -453,7 +439,6 @@ async def group_settings(update: Update, context: CallbackContext):
     # Используем функцию для проверки и редактирования
     await edit_message_if_needed(query, f"Настройки группы: {group_name}", reply_markup)
 
-
 async def rules(update: Update, context: CallbackContext):
     """Отображает правила группы."""
     query = update.callback_query
@@ -472,7 +457,6 @@ async def rules(update: Update, context: CallbackContext):
 
     await query.message.reply_text(f"Правила группы:\n{rules}")
 
-
 async def feedback(update: Update, context: CallbackContext):
     """Отображает обратную связь группы."""
     query = update.callback_query
@@ -490,7 +474,6 @@ async def feedback(update: Update, context: CallbackContext):
 
     feedback_text = group_data[group_id].get("feedback", "Обратная связь не задана.")
     await query.message.reply_text(f"Обратная связь:\n{feedback_text}")
-
 
 async def go_back(update: Update, context: CallbackContext):
     query = update.callback_query
@@ -573,7 +556,6 @@ async def go_back(update: Update, context: CallbackContext):
             await query.edit_message_text("Ошибка: Некорректный идентификатор группы.")
             return
 
-
 async def edit_message_if_needed(query, new_text, new_reply_markup):
     """Редактирует сообщение только если его содержимое или клавиатура изменились."""
     current_text = query.message.text
@@ -641,6 +623,7 @@ async def view_settings(update: Update, context: CallbackContext):
     settings = group_data[group_id]
     response = (
         f"Настройки группы {settings['group_name']}:\n"
+        f"🔸 Количество пользователей: {len(settings['users'])}:\n"
         f"🔸 Лимит сообщений в секунду: {settings['MAX_MESSAGES_PER_SECOND']}\n"
         f"🔸 Время временного мута: {settings['MUT_SECONDS']} секунд\n"
         f"🔸 Время жизни капчи: {settings.get('CAPTCHA_TIMEOUT', 3600)} секунд\n"
@@ -722,6 +705,7 @@ async def captcha_settings(update: Update, context: CallbackContext):
 
 
 
+
 async def set_banned_words(update: Update, context: CallbackContext):
     query = update.callback_query
     await query.answer()
@@ -738,7 +722,6 @@ async def set_banned_words(update: Update, context: CallbackContext):
     context.user_data['current_group'] = group_id
     context.user_data['awaiting_banned_words'] = True
     await query.message.reply_text("Введите запрещенные слова через запятую с пробелом (, ):")
-
 
 async def set_max_messages(update: Update, context: CallbackContext):
     query = update.callback_query
@@ -757,7 +740,6 @@ async def set_max_messages(update: Update, context: CallbackContext):
     context.user_data['awaiting_max_messages'] = True
     await query.message.reply_text("Введите новый лимит сообщений в секунду:")
 
-
 async def set_mut(update: Update, context: CallbackContext):
     query = update.callback_query
     await query.answer()
@@ -774,7 +756,6 @@ async def set_mut(update: Update, context: CallbackContext):
     context.user_data['current_group'] = group_id
     context.user_data['awaiting_mut'] = True
     await query.message.reply_text("Введите новое количество минут мута:")
-
 
 async def set_warn_grup(update: Update, context: CallbackContext):
     query = update.callback_query
@@ -793,7 +774,6 @@ async def set_warn_grup(update: Update, context: CallbackContext):
     context.user_data['awaiting_warn_grup'] = True
     await query.message.reply_text("Введите новый id группы, его можно узнать например из бота @getmyid_bot")
 
-
 async def set_captcha_timeout(update: Update, context: CallbackContext):
     query = update.callback_query
     await query.answer()
@@ -810,7 +790,6 @@ async def set_captcha_timeout(update: Update, context: CallbackContext):
     context.user_data['current_group'] = group_id
     context.user_data['awaiting_captcha_timeout'] = True
     await query.message.reply_text("Введите новое время жизни капчи (в секундах):")
-
 
 async def set_captcha_attempts(update: Update, context: CallbackContext):
     query = update.callback_query
@@ -1332,10 +1311,6 @@ async def send_error_message(application: Application, error: str, group_name: s
         error_message += f"\nСообщение, в котором произошла ошибка: {message_link}"
 
     await application.bot.send_message(ERROR_GROUP_ID, error_message)
-
-
-
-
 
 async def main():
     application = Application.builder().token(BOT_TOKEN).build()
