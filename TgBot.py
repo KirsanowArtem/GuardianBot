@@ -34,6 +34,24 @@ captcha_data = {}
 current_number = 1
 BOT_TOKEN = "7628643183:AAFkpHzp0o7WTFOKa6pjApDl4FDpr6aAOzs"
 ERROR_GROUP_ID = -1002295285798  # ID группы для ошибок
+LANGUAGES = {"en": "English", "uk": "Українська", "ru": "Русский"}
+
+
+def get_language_keyboard(current_language):
+    buttons = [
+        [
+            InlineKeyboardButton(
+                f"{LANGUAGES[lang]}{' *' if lang == current_language else ''}",
+                callback_data=f"set_language_{lang}"
+            )
+        ]
+        for lang in LANGUAGES
+    ]
+    return InlineKeyboardMarkup(buttons)
+
+
+
+
 
 """
 group_data = {
@@ -102,7 +120,13 @@ async def start(update: Update, context: CallbackContext):
     user_id = update.effective_user.id
 
     if update.message.chat.type not in ["group", "supergroup"]:
-        await update.message.reply_text("Эта команда доступна только в группах.")
+        language = group_data.get(chat_id, {}).get("language", "en")
+        group_data.setdefault(chat_id, {})["language"] = language
+
+        await update.message.reply_text(
+            "Select your language / Оберіть мову / Выберите язык:",
+            reply_markup=get_language_keyboard(language)
+        )
         return
 
     if chat_id not in group_data:
@@ -315,7 +339,39 @@ async def new_member(update: Update, context: CallbackContext):
         await send_captcha(update, context, chat_id, user_id)
 
 
+async def language(update: Update, context: CallbackContext):
+    """Выбор языка через команду /language."""
+    language = context.user_data.get("language", "en")
 
+    await update.message.reply_text(
+        "Select your language:",
+        reply_markup=get_language_keyboard(language)
+    )
+
+async def set_language(update: Update, context: CallbackContext):
+    """Обработчик кнопок выбора языка."""
+    query = update.callback_query
+    await query.answer()
+
+    language = query.data.split("_")[-1]
+    context.user_data["language"] = language
+
+    await query.edit_message_text(
+        f"Language set to {LANGUAGES[language]}",
+        reply_markup=get_language_keyboard(language)
+    )
+
+# Пример функции, где язык влияет на сообщение бота
+async def example_message(update: Update, context: CallbackContext):
+    chat_id = update.effective_chat.id
+    language = group_data.get(chat_id, {}).get("language", "en")
+
+    messages = {
+        "en": "This is an example message.",
+        "uk": "Це приклад повідомлення.",
+        "ru": "Это пример сообщения."
+    }
+    await update.message.reply_text(messages[language])
 
 
 
@@ -325,17 +381,7 @@ async def my_groups(update: Update, context: CallbackContext):
     user_id = update.effective_user.id
     chat_id = update.effective_chat.id
 
-    admin_groups = [
-        g_id for g_id, data in group_data.items()
-        if user_id in data['users']
-        and (await context.bot.get_chat_member(g_id, user_id)).status in ['administrator', 'creator']
-    ]
 
-    user_groups = [
-        g_id for g_id, data in group_data.items()
-        if user_id in data['users']
-        and (await context.bot.get_chat_member(g_id, user_id)).status not in ['administrator', 'creator']
-    ]
 
     keyboard = [
         [InlineKeyboardButton("Администратор", callback_data="role_admin")],
@@ -410,13 +456,12 @@ async def group_settings(update: Update, context: CallbackContext):
     query = update.callback_query
     await query.answer()
 
-    # Разделение данных callback_data
     data_parts = query.data.split("_")
     if len(data_parts) != 3 or data_parts[0] != "group" or data_parts[1] != "settings":
         await query.message.reply_text("Некорректный формат данных. Попробуйте снова.")
         return
 
-    group_id = int(data_parts[-1])  # Получаем ID группы
+    group_id = int(data_parts[-1])
     if group_id not in group_data:
         await query.message.reply_text("Группа не найдена.")
         return
@@ -431,19 +476,23 @@ async def group_settings(update: Update, context: CallbackContext):
             break
 
     group_name = group_data[group_id]['group_name']
-    # Формируем кнопки настроек группы
+    group_language = group_data[group_id].get("language", "en")
+
     keyboard = [
-
-
         [InlineKeyboardButton("Настроить группу с предупреждениями и банами", callback_data=f"set_warn_grup_{group_id}")],
         [InlineKeyboardButton("Просмотреть настройки группы", callback_data=f"view_settings_{group_id}")],
-        [InlineKeyboardButton("Изменить описание правил группы", callback_data=f"set_rules_grup_{group_id}")],
-        [InlineKeyboardButton("Изменить обратную связь для группы", callback_data=f"set_feedback_grup_{group_id}")],
-        [InlineKeyboardButton("Назад", callback_data=f"go_back_{group_id}")],
+        [InlineKeyboardButton("Изменить язык группы", callback_data=f"change_group_language_{group_id}")],
+        [InlineKeyboardButton("Назад", callback_data=f"go_back_{group_id}")]
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
-    # Используем функцию для проверки и редактирования
-    await edit_message_if_needed(query, f"Настройки группы: {group_name}", reply_markup)
+
+    response = (
+        f"Настройки группы: {group_name}\n"
+        f"- Язык группы: {LANGUAGES[group_language]}"
+    )
+    await edit_message_if_needed(query, response, reply_markup)
+
+
 
 async def rules(update: Update, context: CallbackContext):
     """Отображает правила группы."""
@@ -572,6 +621,59 @@ async def edit_message_if_needed(query, new_text, new_reply_markup):
         return  # Ничего не делаем, если текст и клавиатура не изменились
     # Выполняем редактирование
     await query.edit_message_text(new_text, reply_markup=new_reply_markup)
+
+
+async def change_group_language(update: Update, context: CallbackContext):
+    """Обработчик кнопки изменения языка группы."""
+    query = update.callback_query
+    await query.answer()
+
+    group_id = int(query.data.split("_")[-1])
+    current_language = group_data[group_id].get("language", "en")
+
+    # Сообщение выбора языка группы
+    message = await query.message.reply_text(
+        "Выберите язык группы:",
+        reply_markup=get_language_keyboard(current_language)
+    )
+    context.user_data["temp_message_id"] = message.message_id
+    context.user_data["current_group_id"] = group_id
+
+
+async def set_group_language(update: Update, context: CallbackContext):
+    """Устанавливает выбранный язык группы."""
+    query = update.callback_query
+    await query.answer()
+
+    language = query.data.split("_")[-1]
+    group_id = context.user_data.get("current_group_id")
+
+    if group_id not in group_data:
+        await query.message.reply_text("Ошибка: Группа не найдена.")
+        return
+
+    group_data[group_id]["language"] = language
+
+    await context.bot.delete_message(
+        chat_id=query.message.chat.id,
+        message_id=context.user_data["temp_message_id"]
+    )
+
+    await query.edit_message_text(
+        f"Настройки группы: {group_data[group_id]['group_name']}\n"
+        f"- Язык группы: {LANGUAGES[language]}",
+        reply_markup=InlineKeyboardMarkup([
+            [InlineKeyboardButton("Настроить группу с предупреждениями и банами", callback_data=f"set_warn_grup_{group_id}")],
+            [InlineKeyboardButton("Просмотреть настройки группы", callback_data=f"view_settings_{group_id}")],
+            [InlineKeyboardButton("Изменить язык группы", callback_data=f"change_group_language_{group_id}")],
+            [InlineKeyboardButton("Назад", callback_data=f"go_back_{group_id}")]
+        ])
+    )
+
+
+
+
+
 
 
 
@@ -720,8 +822,6 @@ async def captcha_settings(update: Update, context: CallbackContext):
     await query.edit_message_text("Настройки капчи:", reply_markup=reply_markup)
 
 
-
-
 async def set_banned_words(update: Update, context: CallbackContext):
     query = update.callback_query
     await query.answer()
@@ -855,8 +955,6 @@ async def set_feedback_attempts(update: Update, context: CallbackContext):
     context.user_data['awaiting_feedback_attempts'] = True
     await query.message.reply_text("Введите обратную связь для групы:")
 
-
-
 async def save_banned_words(update: Update, context: CallbackContext):
     if not context.user_data.get('awaiting_banned_words'):
         return
@@ -893,7 +991,7 @@ async def save_max_messages(update: Update, context: CallbackContext):
     try:
         new_limit = int(update.message.text)
         if new_limit < 0:
-            await update.message.reply_text("Лимит должен быть положительным числом или равен 0 если хотите отключить лемит.")
+            await update.message.reply_text("Лимит должен быть положительным числом")
             return
 
         group_data[group_id]['MAX_MESSAGES_PER_SECOND'] = new_limit
@@ -1416,8 +1514,14 @@ async def main():
     application.add_handler(CallbackQueryHandler(set_captcha_attempts, pattern="^set_captcha_attempts_"))
     application.add_handler(CallbackQueryHandler(set_rules_attempts, pattern="^set_rules_grup_"))
     application.add_handler(CallbackQueryHandler(set_feedback_attempts, pattern="^set_feedback_grup_"))
+    application.add_handler(CallbackQueryHandler(change_group_language, pattern="^change_group_language_"))
+    application.add_handler(CallbackQueryHandler(set_group_language, pattern="^set_group_language_"))
 
     application.add_handler(CallbackQueryHandler(captcha_callback, pattern="^captcha_"))
+
+    application.add_handler(CommandHandler("example", example_message))
+    application.add_handler(CommandHandler("language", language))
+    application.add_handler(CallbackQueryHandler(set_language, pattern="^set_language_"))
 
     application.add_handler(MessageHandler(filters.StatusUpdate.NEW_CHAT_MEMBERS, new_member))
 

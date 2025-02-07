@@ -6,9 +6,7 @@
   <component name="ChangeListManager">
     <list default="true" id="fd39c641-2b19-476c-b05a-9f8129cf2b9a" name="Changes" comment="">
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/Tg2.py" beforeDir="false" afterPath="$PROJECT_DIR$/Tg2.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/TgBot.py" beforeDir="false" afterPath="$PROJECT_DIR$/TgBot.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/requirements.txt" beforeDir="false" afterPath="$PROJECT_DIR$/requirements.txt" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
@@ -77,28 +75,18 @@
       <breakpoints>
         <line-breakpoint enabled="true" suspend="THREAD" type="python-line">
           <url>file://$PROJECT_DIR$/TgBot.py</url>
-          <line>646</line>
-          <option name="timeStamp" value="81" />
-        </line-breakpoint>
-        <line-breakpoint enabled="true" suspend="THREAD" type="python-line">
-          <url>file://$PROJECT_DIR$/TgBot.py</url>
-          <line>640</line>
+          <line>691</line>
           <option name="timeStamp" value="85" />
         </line-breakpoint>
         <line-breakpoint enabled="true" suspend="THREAD" type="python-line">
           <url>file://$PROJECT_DIR$/TgBot.py</url>
-          <line>825</line>
-          <option name="timeStamp" value="86" />
+          <line>341</line>
+          <option name="timeStamp" value="91" />
         </line-breakpoint>
         <line-breakpoint enabled="true" suspend="THREAD" type="python-line">
           <url>file://$PROJECT_DIR$/TgBot.py</url>
-          <line>1240</line>
-          <option name="timeStamp" value="88" />
-        </line-breakpoint>
-        <line-breakpoint enabled="true" suspend="THREAD" type="python-line">
-          <url>file://$PROJECT_DIR$/TgBot.py</url>
-          <line>1168</line>
-          <option name="timeStamp" value="90" />
+          <line>359</line>
+          <option name="timeStamp" value="92" />
         </line-breakpoint>
       </breakpoints>
     </breakpoint-manager>
