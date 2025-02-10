@@ -38,16 +38,14 @@ LANGUAGES = {"en": "English", "uk": "Українська", "ru": "Русски�
 
 
 def get_language_keyboard(current_language):
+    print("-0-0-")
     buttons = [
-        [
-            InlineKeyboardButton(
-                f"{LANGUAGES[lang]}{' *' if lang == current_language else ''}",
-                callback_data=f"set_language_{lang}"
-            )
-        ]
-        for lang in LANGUAGES
+        InlineKeyboardButton(
+            f"{LANGUAGES[lang]}{' *' if lang == current_language else ''}",
+            callback_data=f"set_group_language_{lang}"
+        ) for lang in LANGUAGES.keys()
     ]
-    return InlineKeyboardMarkup(buttons)
+    return InlineKeyboardMarkup([[button] for button in buttons])
 
 
 
@@ -143,6 +141,7 @@ async def start(update: Update, context: CallbackContext):
             'user_message_timestamps': {},
             'rules': "Правила не заданы.",
             'feedback': "Обратная связь не задана.",
+            'language': "en"
         }
 
     chat_member = await update.effective_chat.get_member(user_id)
@@ -177,7 +176,22 @@ async def start(update: Update, context: CallbackContext):
     else:
         await update.message.reply_text("Капча отключена. Пользователь добавлен без ограничений.")
 
+
 async def send_captcha(update: Update, context: CallbackContext, chat_id, user_id):
+    LANGUAGES_TEXTS = {
+        "en": "Choose the correct option:",
+        "uk": "Оберіть правильний варіант:",
+        "ru": "Выберите правильный вариант:"
+    }
+
+    # Получаем язык группы
+    language = group_data.get(chat_id, {}).get("language", "en")
+    print(language)
+    print(group_data.get(chat_id, {}).get("language"))
+    print(LANGUAGES[language])
+    print("---")
+    caption_text = LANGUAGES_TEXTS[language]
+
     characters = string.ascii_lowercase + string.digits
     correct_text = ''.join(random.choices(characters, k=8))
 
@@ -226,7 +240,7 @@ async def send_captcha(update: Update, context: CallbackContext, chat_id, user_i
     message = await context.bot.send_photo(
         chat_id=chat_id,
         photo=image_stream,
-        caption=f"{user_name}, выберите правильный вариант:",
+        caption=f"{user_name}, {caption_text}",
         reply_markup=keyboard
     )
 
@@ -239,11 +253,39 @@ async def captcha_callback(update: Update, context: CallbackContext):
     chat_id = query.message.chat.id
     current_user_id = query.from_user.id
 
+    LANGUAGES_TEXTS = {
+        "en": {
+            "wrong_user": "This is not your captcha. Please complete your own.",
+            "captcha_done": "You have already completed the captcha.",
+            "captcha_passed": "Captcha passed! Mute removed.",
+            "ban_reason_timeout": "removed from the chat for exceeding the waiting time.",
+            "ban_reason_attempts": "removed from the chat for exceeding the number of attempts."
+        },
+        "uk": {
+            "wrong_user": "Це не ваша капча. Пройдіть свою.",
+            "captcha_done": "Ви вже пройшли капчу.",
+            "captcha_passed": "Капча пройдена! Мут знято.",
+            "ban_reason_timeout": "видалений із чату за перевищення часу очікування.",
+            "ban_reason_attempts": "видалений із чату за перевищення кількості спроб."
+        },
+        "ru": {
+            "wrong_user": "Это не ваша капча. Пройдите свою.",
+            "captcha_done": "Вы уже прошли капчу.",
+            "captcha_passed": "Капча пройдена! Мут снят.",
+            "ban_reason_timeout": "удален из чата за превышение времени ожидания.",
+            "ban_reason_attempts": "удален из чата за превышение количества попыток."
+        }
+    }
+
+    # Определяем язык группы
+    language = group_data.get(chat_id, {}).get("language", "en")
+    texts = LANGUAGES_TEXTS[language]
+
     if current_user_id != user_id:
         if current_user_id in captcha_data:
-            await query.answer("Это не ваша капча. Пройдите свою.")
+            await query.answer(texts["wrong_user"])
             await query.message.reply_text(
-                f"@{query.from_user.username}, пожалуйста, пройдите свою капчу."
+                f"@{query.from_user.username}, {texts['wrong_user']}"
             )
         else:
             chat_member = await context.bot.get_chat_member(chat_id, current_user_id)
@@ -252,7 +294,7 @@ async def captcha_callback(update: Update, context: CallbackContext):
         return
 
     if current_user_id not in captcha_data:
-        await query.answer("Вы уже прошли капчу.")
+        await query.answer(texts["captcha_done"])
         return
 
     captcha_info = captcha_data[current_user_id]
@@ -266,7 +308,7 @@ async def captcha_callback(update: Update, context: CallbackContext):
         await query.message.delete()
         await context.bot.send_message(
             chat_id=chat_id,
-            text="Капча пройдена! Мут снят."
+            text=texts["captcha_passed"]
         )
         await query.message.chat.restrict_member(
             current_user_id,
@@ -283,20 +325,36 @@ async def captcha_callback(update: Update, context: CallbackContext):
             await query.message.delete()
             await send_captcha(update, context, chat_id, current_user_id)
 
+
 async def captcha_ban_user(update: Update, context: CallbackContext, chat_id, user_id, timeout_expired=False):
+    LANGUAGES_TEXTS = {
+        "en": {
+            "ban_message": "removed from the chat for exceeding the waiting time." if timeout_expired else "removed from the chat for exceeding the number of attempts."
+        },
+        "uk": {
+            "ban_message": "видалений із чату за перевищення часу очікування." if timeout_expired else "видалений із чату за перевищення кількості спроб."
+        },
+        "ru": {
+            "ban_message": "удален из чата за превышение времени ожидания." if timeout_expired else "удален из чата за превышение количества попыток."
+        }
+    }
+
+    language = group_data.get(chat_id, {}).get("language", "en")
+    texts = LANGUAGES_TEXTS[language]
+
     await context.bot.ban_chat_member(chat_id, user_id)
     group_data[chat_id]['users'][user_id]['banned'] = True
     name = group_data[chat_id]['users'][user_id]['name']
-    reason = "превышено время ожидания" if timeout_expired else "превышено количество попыток"
+    reason = texts["ban_message"]
     ban_message = (
-        f"Пользователь {name} удален из чата за {reason}.\n"
+        f"Пользователь {name} {reason}\n"
         f"#CAPTCHA_BAN\n"
         f"#BAN"
     )
 
     special_group_id = group_data[chat_id].get("SPECIAL_GROUP_ID", -1002483663129)
     await context.bot.send_message(special_group_id, ban_message)
-    await context.bot.send_message(chat_id, f"Пользователь {name} удален из чата за {reason}.")
+    await context.bot.send_message(chat_id, f"Пользователь {name} {reason}.")
 
 async def new_member(update: Update, context: CallbackContext):
     chat_id = update.effective_chat.id
@@ -365,6 +423,9 @@ async def set_language(update: Update, context: CallbackContext):
 async def example_message(update: Update, context: CallbackContext):
     chat_id = update.effective_chat.id
     language = group_data.get(chat_id, {}).get("language", "en")
+    print(group_data.get(chat_id, {}).get("language", "en"))
+    print(group_data.get(chat_id, {}).get("language"))
+    print(group_data.get(chat_id, {}))
 
     messages = {
         "en": "This is an example message.",
@@ -624,18 +685,21 @@ async def edit_message_if_needed(query, new_text, new_reply_markup):
 
 
 async def change_group_language(update: Update, context: CallbackContext):
+    print("=========================================")
     """Обработчик кнопки изменения языка группы."""
     query = update.callback_query
     await query.answer()
 
     group_id = int(query.data.split("_")[-1])
     current_language = group_data[group_id].get("language", "en")
+    print(group_data[group_id].get("language"))
 
     # Сообщение выбора языка группы
     message = await query.message.reply_text(
-        "Выберите язык группы:",
+        "Выберите язык группы2:",
         reply_markup=get_language_keyboard(current_language)
     )
+    print(current_language)
     context.user_data["temp_message_id"] = message.message_id
     context.user_data["current_group_id"] = group_id
 
@@ -652,14 +716,18 @@ async def set_group_language(update: Update, context: CallbackContext):
         await query.message.reply_text("Ошибка: Группа не найдена.")
         return
 
+    # Сохраняем язык группы
     group_data[group_id]["language"] = language
+    print(f"Язык группы {group_id} изменен на {language}")
 
+    # Удаление временного сообщения с выбором языка
     await context.bot.delete_message(
         chat_id=query.message.chat.id,
         message_id=context.user_data["temp_message_id"]
     )
 
-    await query.edit_message_text(
+    # Отправляем новое сообщение вместо редактирования удаленного
+    await query.message.reply_text(
         f"Настройки группы: {group_data[group_id]['group_name']}\n"
         f"- Язык группы: {LANGUAGES[language]}",
         reply_markup=InlineKeyboardMarkup([
@@ -669,7 +737,6 @@ async def set_group_language(update: Update, context: CallbackContext):
             [InlineKeyboardButton("Назад", callback_data=f"go_back_{group_id}")]
         ])
     )
-
 
 
 
@@ -1518,6 +1585,7 @@ async def main():
     application.add_handler(CallbackQueryHandler(set_group_language, pattern="^set_group_language_"))
 
     application.add_handler(CallbackQueryHandler(captcha_callback, pattern="^captcha_"))
+
 
     application.add_handler(CommandHandler("example", example_message))
     application.add_handler(CommandHandler("language", language))
