@@ -1,0 +1,1103 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Guardian Bot Admin Panel</title>
+    <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@300;400;500;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css">
+    <style>
+        :root {
+            --primary-color: #0088cc;
+            --secondary-color: #f0f2f5;
+            --accent-color: #25d366;
+            --text-color: #333;
+            --light-text: #777;
+            --border-color: #ddd;
+            --error-color: #ff4444;
+            --success-color: #00c851;
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Roboto', sans-serif;
+            background-color: var(--secondary-color);
+            color: var(--text-color);
+            line-height: 1.6;
+            overflow-x: hidden;
+        }
+
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+            min-height: 100vh;
+            position: relative;
+        }
+
+        /* Анимации */
+        @keyframes fadeIn {
+            from { opacity: 0; }
+            to { opacity: 1; }
+        }
+
+        @keyframes slideIn {
+            from {
+                opacity: 0;
+                transform: translateY(20px);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+
+        @keyframes pulse {
+            0% { transform: scale(1); }
+            50% { transform: scale(1.05); }
+            100% { transform: scale(1); }
+        }
+
+        /* Модальные окна */
+        .modal {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(0, 0, 0, 0.5);
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            z-index: 1000;
+            opacity: 0;
+            pointer-events: none;
+            transition: opacity 0.3s ease;
+        }
+
+        .modal.active {
+            opacity: 1;
+            pointer-events: all;
+        }
+
+        .modal-content {
+            background-color: white;
+            padding: 30px;
+            border-radius: 10px;
+            width: 100%;
+            max-width: 500px;
+            position: relative;
+            transform: translateY(-50px);
+            opacity: 0;
+            transition: all 0.3s ease;
+            box-shadow: 0 10px 25px rgba(0, 0, 0, 0.1);
+        }
+
+        .modal.active .modal-content {
+            transform: translateY(0);
+            opacity: 1;
+        }
+
+        .close-btn {
+            position: absolute;
+            top: 15px;
+            right: 15px;
+            font-size: 20px;
+            cursor: pointer;
+            color: var(--light-text);
+            transition: color 0.2s ease;
+        }
+
+        .close-btn:hover {
+            color: var(--error-color);
+        }
+
+        /* Основные элементы */
+        .btn {
+            padding: 12px 24px;
+            border-radius: 8px;
+            border: none;
+            cursor: pointer;
+            font-weight: 500;
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            transition: all 0.2s ease;
+            font-size: 16px;
+        }
+
+        .btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
+        }
+
+        .btn:active {
+            transform: translateY(0);
+        }
+
+        .btn-primary {
+            background-color: var(--primary-color);
+            color: white;
+        }
+
+        .btn-primary:hover {
+            background-color: #0077b3;
+        }
+
+        .btn-secondary {
+            background-color: var(--secondary-color);
+            color: var(--text-color);
+        }
+
+        .btn-secondary:hover {
+            background-color: #e0e2e5;
+        }
+
+        .btn-danger {
+            background-color: var(--error-color);
+            color: white;
+        }
+
+        .btn-danger:hover {
+            background-color: #e63939;
+        }
+
+        .card {
+            background-color: white;
+            border-radius: 12px;
+            padding: 24px;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.05);
+            margin-bottom: 24px;
+            animation: slideIn 0.5s ease forwards;
+            opacity: 0;
+            transform: translateY(20px);
+        }
+
+        .card:nth-child(1) { animation-delay: 0.1s; }
+        .card:nth-child(2) { animation-delay: 0.2s; }
+        .card:nth-child(3) { animation-delay: 0.3s; }
+
+        .card-title {
+            font-size: 22px;
+            margin-bottom: 20px;
+            padding-bottom: 12px;
+            border-bottom: 1px solid var(--border-color);
+            color: var(--primary-color);
+        }
+
+        /* Панель управления */
+        .dashboard {
+            display: none;
+            animation: fadeIn 0.5s ease forwards;
+        }
+
+        .dashboard.active {
+            display: block;
+        }
+
+        .user-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 30px;
+            animation: slideIn 0.5s ease forwards;
+        }
+
+        .user-info {
+            display: flex;
+            align-items: center;
+            gap: 15px;
+        }
+
+        .user-avatar {
+            width: 60px;
+            height: 60px;
+            border-radius: 50%;
+            background-color: var(--primary-color);
+            color: white;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 24px;
+            font-weight: bold;
+            transition: all 0.3s ease;
+        }
+
+        .user-avatar:hover {
+            transform: rotate(15deg) scale(1.1);
+        }
+
+        /* Навигация */
+        .nav-steps {
+            display: flex;
+            margin-bottom: 24px;
+            gap: 10px;
+            overflow-x: auto;
+            padding-bottom: 10px;
+        }
+
+        .nav-step {
+            padding: 12px 18px;
+            border-radius: 8px;
+            background-color: var(--secondary-color);
+            cursor: pointer;
+            white-space: nowrap;
+            transition: all 0.3s ease;
+        }
+
+        .nav-step:hover {
+            transform: translateY(-2px);
+        }
+
+        .nav-step.active {
+            background-color: var(--primary-color);
+            color: white;
+            box-shadow: 0 4px 8px rgba(0, 136, 204, 0.3);
+        }
+
+        /* Сетка групп */
+        .grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+            gap: 20px;
+        }
+
+        /* Формы */
+        .form-group {
+            margin-bottom: 20px;
+        }
+
+        .form-group label {
+            display: block;
+            margin-bottom: 8px;
+            font-weight: 500;
+            color: var(--text-color);
+        }
+
+        .form-control {
+            width: 100%;
+            padding: 12px 16px;
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+            font-size: 16px;
+            transition: all 0.3s ease;
+        }
+
+        .form-control:focus {
+            border-color: var(--primary-color);
+            outline: none;
+            box-shadow: 0 0 0 3px rgba(0, 136, 204, 0.2);
+        }
+
+        /* Уведомления */
+        .notification {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            padding: 15px 20px;
+            border-radius: 8px;
+            background-color: var(--success-color);
+            color: white;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+            z-index: 1100;
+            transform: translateX(200%);
+            transition: transform 0.3s ease;
+        }
+
+        .notification.show {
+            transform: translateX(0);
+        }
+
+        .notification.error {
+            background-color: var(--error-color);
+        }
+
+        /* Загрузка */
+        .loader {
+            display: inline-block;
+            width: 20px;
+            height: 20px;
+            border: 3px solid rgba(255,255,255,.3);
+            border-radius: 50%;
+            border-top-color: white;
+            animation: spin 1s ease-in-out infinite;
+        }
+
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+
+        /* Адаптивность */
+        @media (max-width: 768px) {
+            .grid {
+                grid-template-columns: 1fr;
+            }
+
+            .user-header {
+                flex-direction: column;
+                align-items: flex-start;
+                gap: 15px;
+            }
+
+            .modal-content {
+                padding: 20px;
+                margin: 0 15px;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <!-- Уведомления -->
+        <div class="notification" id="notification"></div>
+
+        <!-- Шаг 1: Авторизация через Telegram -->
+        <div class="modal active" id="authModal">
+            <div class="modal-content">
+                <span class="close-btn" id="closeAuthModal">&times;</span>
+                <h2>Авторизация через Telegram</h2>
+                <p>Для входа в панель управления необходимо авторизоваться через Telegram</p>
+
+                <div class="form-group">
+                    <label>1. Откройте бота в Telegram</label>
+                    <a href="https://t.me/YOUR_BOT_USERNAME" class="btn btn-primary" target="_blank">
+                        <i class="fab fa-telegram"></i> Открыть бота
+                    </a>
+                </div>
+
+                <div class="form-group">
+                    <label>2. Отправьте команду</label>
+                    <input type="text" class="form-control" value="/website_auth" readonly>
+                </div>
+
+                <div class="form-group">
+                    <label for="authCode">3. Введите полученный код:</label>
+                    <input type="text" id="authCode" class="form-control" placeholder="XXXXXX" maxlength="6">
+                </div>
+
+                <button class="btn btn-primary" id="submitAuthCode">
+                    <span id="authBtnText">Продолжить</span>
+                    <span class="loader" id="authLoader" style="display: none;"></span>
+                </button>
+            </div>
+        </div>
+
+        <!-- Шаг 2: Создание учетной записи -->
+        <div class="modal" id="registerModal">
+            <div class="modal-content">
+                <span class="close-btn" id="closeRegisterModal">&times;</span>
+                <h2>Создание учетной записи</h2>
+                <p>Придумайте логин и пароль для входа на сайт</p>
+
+                <div class="form-group">
+                    <label for="registerUsername">Логин</label>
+                    <input type="text" id="registerUsername" class="form-control" placeholder="Введите логин">
+                </div>
+
+                <div class="form-group">
+                    <label for="registerPassword">Пароль</label>
+                    <input type="password" id="registerPassword" class="form-control" placeholder="Введите пароль">
+                </div>
+
+                <div class="form-group">
+                    <label for="registerConfirmPassword">Подтвердите пароль</label>
+                    <input type="password" id="registerConfirmPassword" class="form-control" placeholder="Повторите пароль">
+                </div>
+
+                <button class="btn btn-primary" id="completeRegistration">
+                    <span id="registerBtnText">Завершить регистрацию</span>
+                    <span class="loader" id="registerLoader" style="display: none;"></span>
+                </button>
+            </div>
+        </div>
+
+        <!-- Основная панель управления -->
+        <div class="dashboard" id="dashboard">
+            <div class="user-header">
+                <div class="user-info">
+                    <div class="user-avatar" id="userAvatar">T</div>
+                    <div>
+                        <h3 id="userDisplayName">Пользователь</h3>
+                        <p id="userTelegram">@telegram</p>
+                    </div>
+                </div>
+                <button class="btn btn-danger" id="logoutBtn">
+                    <i class="fas fa-sign-out-alt"></i> Выйти
+                </button>
+            </div>
+
+            <div class="nav-steps">
+                <div class="nav-step active" data-step="role">Выбор роли</div>
+                <div class="nav-step" data-step="group">Выбор группы</div>
+                <div class="nav-step" data-step="settings">Настройки</div>
+            </div>
+
+            <!-- Шаг 1: Выбор роли -->
+            <div class="card" id="roleStep">
+                <h3 class="card-title">Выберите вашу роль</h3>
+                <div class="grid">
+                    <div class="card">
+                        <h4><i class="fas fa-crown"></i> Администратор</h4>
+                        <p>Полный доступ к настройкам групп</p>
+                        <button class="btn btn-primary" data-role="admin">Выбрать</button>
+                    </div>
+                    <div class="card">
+                        <h4><i class="fas fa-user"></i> Пользователь</h4>
+                        <p>Просмотр информации о группах</p>
+                        <button class="btn btn-primary" data-role="user">Выбрать</button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Шаг 2: Выбор группы -->
+            <div class="card" id="groupStep" style="display: none;">
+                <h3 class="card-title">Ваши группы</h3>
+                <div class="grid" id="groupsList">
+                    <!-- Группы будут загружаться здесь -->
+                </div>
+            </div>
+
+            <!-- Шаг 3: Настройки группы -->
+            <div class="card" id="settingsStep" style="display: none;">
+                <h3 class="card-title" id="groupSettingsTitle">Настройки группы: <span id="currentGroupName"></span></h3>
+
+                <!-- Настройки для администратора -->
+                <div id="adminSettings" style="display: none;">
+                    <div class="card">
+                        <h4><i class="fas fa-cog"></i> Основные настройки</h4>
+
+                        <div class="form-group">
+                            <label>Название группы</label>
+                            <input type="text" class="form-control" id="groupNameInput">
+                        </div>
+
+                        <div class="form-group">
+                            <label>Лимит сообщений в секунду</label>
+                            <input type="number" class="form-control" id="msgLimit" min="1" max="20">
+                        </div>
+
+                        <div class="form-group">
+                            <label>Время мута (секунды)</label>
+                            <input type="number" class="form-control" id="muteTime" min="10">
+                        </div>
+                    </div>
+
+                    <div class="card">
+                        <h4><i class="fas fa-ban"></i> Запрещенные слова</h4>
+                        <div class="form-group">
+                            <textarea class="form-control" id="bannedWords" rows="3" placeholder="Введите слова через запятую"></textarea>
+                        </div>
+                    </div>
+
+                    <div class="card">
+                        <h4><i class="fas fa-shield-alt"></i> Капча</h4>
+                        <div class="form-group">
+                            <label>
+                                <input type="checkbox" id="captchaEnabled"> Включить капчу для новых участников
+                            </label>
+                        </div>
+
+                        <div class="form-group">
+                            <label>Время жизни капчи (секунды)</label>
+                            <input type="number" class="form-control" id="captchaTimeout" min="60">
+                        </div>
+
+                        <div class="form-group">
+                            <label>Количество попыток</label>
+                            <input type="number" class="form-control" id="captchaAttempts" min="1" max="10">
+                        </div>
+                    </div>
+
+                    <div class="card">
+                        <h4><i class="fas fa-exclamation-triangle"></i> Предупреждения</h4>
+                        <div class="form-group">
+                            <label>Лимит предупреждений до бана</label>
+                            <input type="number" class="form-control" id="warnLimit" min="1" max="10">
+                        </div>
+                    </div>
+
+                    <div class="card">
+                        <h4><i class="fas fa-book"></i> Правила группы</h4>
+                        <div class="form-group">
+                            <textarea class="form-control" id="groupRulesInput" rows="4" placeholder="Введите правила группы"></textarea>
+                        </div>
+                    </div>
+
+                    <div class="card">
+                        <h4><i class="fas fa-comment-alt"></i> Обратная связь</h4>
+                        <div class="form-group">
+                            <textarea class="form-control" id="groupFeedbackInput" rows="4" placeholder="Введите контакты для обратной связи"></textarea>
+                        </div>
+                    </div>
+
+                    <button class="btn btn-primary" id="saveSettings">
+                        <i class="fas fa-save"></i> Сохранить все настройки
+                    </button>
+                </div>
+
+                <!-- Информация для пользователя -->
+                <div id="userSettings" style="display: none;">
+                    <div class="card">
+                        <h4><i class="fas fa-info-circle"></i> Информация о группе</h4>
+                        <p>Участников: <strong id="membersCount">0</strong></p>
+                        <p>Администраторов: <strong id="adminsCount">0</strong></p>
+                        <p>Ваших предупреждений: <strong id="userWarnings">0</strong></p>
+                    </div>
+
+                    <div class="card">
+                        <h4><i class="fas fa-book"></i> Правила группы</h4>
+                        <div id="groupRules">Правила не установлены</div>
+                    </div>
+
+                    <div class="card">
+                        <h4><i class="fas fa-comment-alt"></i> Обратная связь</h4>
+                        <div id="groupFeedback">Обратная связь не настроена</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Состояние приложения
+        const state = {
+            user: null,
+            currentStep: 'role',
+            selectedRole: null,
+            selectedGroup: null,
+            groups: [],
+            authToken: null,
+            sessionExpires: null
+        };
+
+        // DOM элементы
+        const elements = {
+            authModal: document.getElementById('authModal'),
+            registerModal: document.getElementById('registerModal'),
+            dashboard: document.getElementById('dashboard'),
+            authCode: document.getElementById('authCode'),
+            submitAuthCode: document.getElementById('submitAuthCode'),
+            authBtnText: document.getElementById('authBtnText'),
+            authLoader: document.getElementById('authLoader'),
+            registerUsername: document.getElementById('registerUsername'),
+            registerPassword: document.getElementById('registerPassword'),
+            registerConfirmPassword: document.getElementById('registerConfirmPassword'),
+            completeRegistration: document.getElementById('completeRegistration'),
+            registerBtnText: document.getElementById('registerBtnText'),
+            registerLoader: document.getElementById('registerLoader'),
+            logoutBtn: document.getElementById('logoutBtn'),
+            userDisplayName: document.getElementById('userDisplayName'),
+            userTelegram: document.getElementById('userTelegram'),
+            userAvatar: document.getElementById('userAvatar'),
+            roleStep: document.getElementById('roleStep'),
+            groupStep: document.getElementById('groupStep'),
+            settingsStep: document.getElementById('settingsStep'),
+            groupsList: document.getElementById('groupsList'),
+            adminSettings: document.getElementById('adminSettings'),
+            userSettings: document.getElementById('userSettings'),
+            groupNameInput: document.getElementById('groupNameInput'),
+            msgLimit: document.getElementById('msgLimit'),
+            muteTime: document.getElementById('muteTime'),
+            bannedWords: document.getElementById('bannedWords'),
+            captchaEnabled: document.getElementById('captchaEnabled'),
+            captchaTimeout: document.getElementById('captchaTimeout'),
+            captchaAttempts: document.getElementById('captchaAttempts'),
+            warnLimit: document.getElementById('warnLimit'),
+            groupRulesInput: document.getElementById('groupRulesInput'),
+            groupFeedbackInput: document.getElementById('groupFeedbackInput'),
+            saveSettings: document.getElementById('saveSettings'),
+            currentGroupName: document.getElementById('currentGroupName'),
+            membersCount: document.getElementById('membersCount'),
+            adminsCount: document.getElementById('adminsCount'),
+            userWarnings: document.getElementById('userWarnings'),
+            groupRules: document.getElementById('groupRules'),
+            groupFeedback: document.getElementById('groupFeedback'),
+            notification: document.getElementById('notification'),
+            closeAuthModal: document.getElementById('closeAuthModal'),
+            closeRegisterModal: document.getElementById('closeRegisterModal')
+        };
+
+        // API endpoints
+        const API = {
+            verifyCode: '/api/verify_auth_code',
+            register: '/api/register',
+            getUserGroups: '/api/get_user_groups',
+            updateSettings: '/api/update_group_settings',
+            checkSession: '/api/check_session'
+        };
+
+        // Инициализация приложения
+        function init() {
+            setupEventListeners();
+            checkSession();
+        }
+
+        // Проверка активной сессии
+        async function checkSession() {
+            const token = localStorage.getItem('authToken');
+            const sessionExpires = localStorage.getItem('sessionExpires');
+
+            if (token && sessionExpires && new Date(sessionExpires) > new Date()) {
+                try {
+                    const response = await fetch(API.checkSession, {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                            'Authorization': `Bearer ${token}`
+                        }
+                    });
+
+                    if (response.ok) {
+                        const data = await response.json();
+                        state.user = data.user;
+                        state.authToken = token;
+                        state.sessionExpires = sessionExpires;
+
+                        updateUserInfo();
+                        showDashboard();
+                        loadUserGroups();
+                        return;
+                    }
+                } catch (error) {
+                    console.error('Session check error:', error);
+                }
+            }
+
+            // Если сессии нет или она невалидна
+            showAuthModal();
+        }
+
+        // Настройка обработчиков событий
+        function setupEventListeners() {
+            // Авторизация
+            elements.submitAuthCode.addEventListener('click', handleAuthCodeSubmit);
+            elements.completeRegistration.addEventListener('click', handleRegistration);
+            elements.logoutBtn.addEventListener('click', logout);
+            elements.closeAuthModal.addEventListener('click', () => hideAuthModal());
+            elements.closeRegisterModal.addEventListener('click', () => hideRegisterModal());
+
+            // Навигация
+            document.querySelectorAll('.nav-step').forEach(step => {
+                step.addEventListener('click', () => navigateTo(step.dataset.step));
+            });
+
+            // Выбор роли
+            document.querySelectorAll('[data-role]').forEach(btn => {
+                btn.addEventListener('click', () => selectRole(btn.dataset.role));
+            });
+
+            // Сохранение настроек
+            elements.saveSettings.addEventListener('click', saveGroupSettings);
+
+            // Автозаполнение кода (для удобства тестирования)
+            elements.authCode.addEventListener('input', function(e) {
+                this.value = this.value.replace(/[^A-Z0-9]/g, '').toUpperCase();
+            });
+        }
+
+        // Обработка кода авторизации
+        async function handleAuthCodeSubmit() {
+            const code = elements.authCode.value.trim();
+
+            if (!code) {
+                showNotification('Пожалуйста, введите код', 'error');
+                return;
+            }
+
+            toggleAuthLoading(true);
+
+            try {
+                const response = await fetch(API.verifyCode, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({ code })
+                });
+
+                const result = await response.json();
+
+                if (response.ok) {
+                    if (result.isRegistered) {
+                        // Пользователь уже зарегистрирован
+                        saveSession(result.token, result.expires, result.user);
+                        state.user = result.user;
+
+                        updateUserInfo();
+                        showDashboard();
+                        hideAuthModal();
+                        loadUserGroups();
+                        showNotification('Успешный вход!');
+                    } else {
+                        // Нужна регистрация
+                        state.telegramUser = result.telegramUser;
+                        hideAuthModal();
+                        showRegisterModal();
+                    }
+                } else {
+                    showNotification(result.message || 'Неверный код авторизации', 'error');
+                }
+            } catch (error) {
+                console.error('Auth error:', error);
+                showNotification('Ошибка соединения с сервером', 'error');
+            } finally {
+                toggleAuthLoading(false);
+            }
+        }
+
+        // Обработка регистрации
+        async function handleRegistration() {
+            const username = elements.registerUsername.value.trim();
+            const password = elements.registerPassword.value;
+            const confirmPassword = elements.registerConfirmPassword.value;
+
+            if (!username || !password || !confirmPassword) {
+                showNotification('Пожалуйста, заполните все поля', 'error');
+                return;
+            }
+
+            if (password !== confirmPassword) {
+                showNotification('Пароли не совпадают', 'error');
+                return;
+            }
+
+            if (password.length < 6) {
+                showNotification('Пароль должен содержать минимум 6 символов', 'error');
+                return;
+            }
+
+            toggleRegisterLoading(true);
+
+            try {
+                const response = await fetch(API.register, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        telegramUser: state.telegramUser,
+                        username,
+                        password
+                    })
+                });
+
+                const result = await response.json();
+
+                if (response.ok) {
+                    saveSession(result.token, result.expires, result.user);
+                    state.user = result.user;
+
+                    updateUserInfo();
+                    hideRegisterModal();
+                    showDashboard();
+                    loadUserGroups();
+                    showNotification('Регистрация успешно завершена!');
+                } else {
+                    showNotification(result.message || 'Ошибка регистрации', 'error');
+                }
+            } catch (error) {
+                console.error('Registration error:', error);
+                showNotification('Ошибка соединения с сервером', 'error');
+            } finally {
+                toggleRegisterLoading(false);
+            }
+        }
+
+        // Сохранение сессии
+        function saveSession(token, expires, user) {
+            localStorage.setItem('authToken', token);
+            localStorage.setItem('sessionExpires', expires);
+            localStorage.setItem('user', JSON.stringify(user));
+
+            state.authToken = token;
+            state.sessionExpires = expires;
+            state.user = user;
+        }
+
+        // Выход из системы
+        function logout() {
+            localStorage.removeItem('authToken');
+            localStorage.removeItem('sessionExpires');
+            localStorage.removeItem('user');
+
+            state.user = null;
+            state.authToken = null;
+            state.sessionExpires = null;
+            state.groups = [];
+            state.selectedGroup = null;
+
+            hideDashboard();
+            showAuthModal();
+            showNotification('Вы успешно вышли из системы');
+        }
+
+        // Обновление информации о пользователе
+        function updateUserInfo() {
+            if (!state.user) return;
+
+            elements.userDisplayName.textContent = state.user.telegram.first_name || 'Пользователь';
+            elements.userTelegram.textContent = `@${state.user.telegram.username || 'telegram'}`;
+            elements.userAvatar.textContent = state.user.telegram.first_name ? state.user.telegram.first_name[0].toUpperCase() : 'T';
+
+            // Анимация аватара
+            elements.userAvatar.style.animation = 'pulse 0.5s ease';
+            setTimeout(() => {
+                elements.userAvatar.style.animation = '';
+            }, 500);
+        }
+
+        // Загрузка групп пользователя
+        async function loadUserGroups() {
+            try {
+                const response = await fetch(API.getUserGroups, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': `Bearer ${state.authToken}`
+                    },
+                    body: JSON.stringify({
+                        telegram_id: state.user.telegram.id
+                    })
+                });
+
+                const result = await response.json();
+
+                if (response.ok) {
+                    state.groups = result.groups;
+                    renderGroups();
+                } else {
+                    console.error('Ошибка загрузки групп:', result.message);
+                    showNotification('Не удалось загрузить группы', 'error');
+                }
+            } catch (error) {
+                console.error('Ошибка:', error);
+                showNotification('Ошибка соединения с сервером', 'error');
+            }
+        }
+
+        // Отображение групп
+        function renderGroups() {
+            elements.groupsList.innerHTML = '';
+
+            if (state.groups.length === 0) {
+                elements.groupsList.innerHTML = '<p>У вас нет доступных групп</p>';
+                return;
+            }
+
+            state.groups.forEach((group, index) => {
+                const groupCard = document.createElement('div');
+                groupCard.className = 'card';
+                groupCard.style.animationDelay = `${0.1 * index}s`;
+                groupCard.innerHTML = `
+                    <h4>${group.name}</h4>
+                    <p><i class="fas fa-users"></i> Участников: ${group.members_count}</p>
+                    <p><i class="fas fa-crown"></i> Администраторов: ${group.admins_count}</p>
+                    ${group.user_warnings > 0 ? `<p><i class="fas fa-exclamation-triangle"></i> Ваших предупреждений: ${group.user_warnings}</p>` : ''}
+                    <button class="btn btn-primary" data-group-id="${group.id}">Выбрать</button>
+                `;
+
+                groupCard.querySelector('button').addEventListener('click', () => selectGroup(group.id));
+                elements.groupsList.appendChild(groupCard);
+            });
+        }
+
+        // Выбор роли
+        function selectRole(role) {
+            state.selectedRole = role;
+            navigateTo('group');
+        }
+
+        // Выбор группы
+        function selectGroup(groupId) {
+            state.selectedGroup = state.groups.find(g => g.id == groupId);
+            navigateTo('settings');
+            updateGroupSettings();
+        }
+
+        // Обновление настроек группы
+        function updateGroupSettings() {
+            if (!state.selectedGroup) return;
+
+            elements.currentGroupName.textContent = state.selectedGroup.name;
+
+            if (state.selectedRole === 'admin') {
+                elements.adminSettings.style.display = 'block';
+                elements.userSettings.style.display = 'none';
+
+                // Заполняем поля настроек
+                elements.groupNameInput.value = state.selectedGroup.name;
+                elements.msgLimit.value = state.selectedGroup.settings.MAX_MESSAGES_PER_SECOND;
+                elements.muteTime.value = state.selectedGroup.settings.MUT_SECONDS;
+                elements.bannedWords.value = state.selectedGroup.settings.banned_words.join(', ');
+                elements.captchaEnabled.checked = state.selectedGroup.settings.CAPTCHA_ENABLED;
+                elements.captchaTimeout.value = state.selectedGroup.settings.CAPTCHA_TIMEOUT;
+                elements.captchaAttempts.value = state.selectedGroup.settings.CAPTCHA_ATTEMPTS;
+                elements.warnLimit.value = state.selectedGroup.settings.WARN_LIMIT;
+                elements.groupRulesInput.value = state.selectedGroup.rules;
+                elements.groupFeedbackInput.value = state.selectedGroup.feedback;
+            } else {
+                elements.adminSettings.style.display = 'none';
+                elements.userSettings.style.display = 'block';
+
+                // Заполняем информацию для пользователя
+                elements.membersCount.textContent = state.selectedGroup.members_count;
+                elements.adminsCount.textContent = state.selectedGroup.admins_count;
+                elements.userWarnings.textContent = state.selectedGroup.user_warnings;
+                elements.groupRules.textContent = state.selectedGroup.rules || 'Правила не установлены';
+                elements.groupFeedback.textContent = state.selectedGroup.feedback || 'Обратная связь не настроена';
+            }
+        }
+
+        // Сохранение настроек группы
+        async function saveGroupSettings() {
+            if (!state.selectedGroup || state.selectedRole !== 'admin') return;
+
+            const settings = {
+                name: elements.groupNameInput.value,
+                MAX_MESSAGES_PER_SECOND: parseInt(elements.msgLimit.value),
+                MUT_SECONDS: parseInt(elements.muteTime.value),
+                banned_words: elements.bannedWords.value.split(',').map(w => w.trim()).filter(w => w),
+                CAPTCHA_ENABLED: elements.captchaEnabled.checked,
+                CAPTCHA_TIMEOUT: parseInt(elements.captchaTimeout.value),
+                CAPTCHA_ATTEMPTS: parseInt(elements.captchaAttempts.value),
+                WARN_LIMIT: parseInt(elements.warnLimit.value),
+                rules: elements.groupRulesInput.value,
+                feedback: elements.groupFeedbackInput.value
+            };
+
+            try {
+                const response = await fetch(API.updateSettings, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': `Bearer ${state.authToken}`
+                    },
+                    body: JSON.stringify({
+                        group_id: state.selectedGroup.id,
+                        settings: settings
+                    })
+                });
+
+                const result = await response.json();
+
+                if (response.ok) {
+                    showNotification('Настройки успешно сохранены!');
+
+                    // Обновляем данные в состоянии
+                    state.selectedGroup.name = settings.name;
+                    state.selectedGroup.settings = settings;
+                    state.selectedGroup.rules = settings.rules;
+                    state.selectedGroup.feedback = settings.feedback;
+
+                    // Обновляем список групп
+                    const groupIndex = state.groups.findIndex(g => g.id === state.selectedGroup.id);
+                    if (groupIndex >= 0) {
+                        state.groups[groupIndex] = {...state.groups[groupIndex], ...state.selectedGroup};
+                    }
+                } else {
+                    showNotification('Ошибка сохранения: ' + (result.message || 'Неизвестная ошибка'), 'error');
+                }
+            } catch (error) {
+                console.error('Ошибка:', error);
+                showNotification('Ошибка соединения с сервером', 'error');
+            }
+        }
+
+        // Навигация по шагам
+        function navigateTo(step) {
+            state.currentStep = step;
+
+            // Обновляем активный шаг в навигации
+            document.querySelectorAll('.nav-step').forEach(el => {
+                el.classList.toggle('active', el.dataset.step === step);
+            });
+
+            // Показываем соответствующий блок
+            elements.roleStep.style.display = step === 'role' ? 'block' : 'none';
+            elements.groupStep.style.display = step === 'group' ? 'block' : 'none';
+            elements.settingsStep.style.display = step === 'settings' ? 'block' : 'none';
+
+            // Анимация перехода
+            if (step === 'group') {
+                elements.groupsList.style.opacity = 0;
+                setTimeout(() => {
+                    elements.groupsList.style.opacity = 1;
+                }, 300);
+            }
+        }
+
+        // Управление модальными окнами
+        function showAuthModal() {
+            elements.authModal.classList.add('active');
+            elements.authCode.value = '';
+        }
+
+        function hideAuthModal() {
+            elements.authModal.classList.remove('active');
+        }
+
+        function showRegisterModal() {
+            elements.registerModal.classList.add('active');
+            elements.registerUsername.value = '';
+            elements.registerPassword.value = '';
+            elements.registerConfirmPassword.value = '';
+        }
+
+        function hideRegisterModal() {
+            elements.registerModal.classList.remove('active');
+        }
+
+        function showDashboard() {
+            elements.dashboard.classList.add('active');
+        }
+
+        function hideDashboard() {
+            elements.dashboard.classList.remove('active');
+        }
+
+        // Управление загрузкой
+        function toggleAuthLoading(loading) {
+            if (loading) {
+                elements.authBtnText.style.display = 'none';
+                elements.authLoader.style.display = 'inline-block';
+                elements.submitAuthCode.disabled = true;
+            } else {
+                elements.authBtnText.style.display = 'inline';
+                elements.authLoader.style.display = 'none';
+                elements.submitAuthCode.disabled = false;
+            }
+        }
+
+        function toggleRegisterLoading(loading) {
+            if (loading) {
+                elements.registerBtnText.style.display = 'none';
+                elements.registerLoader.style.display = 'inline-block';
+                elements.completeRegistration.disabled = true;
+            } else {
+                elements.registerBtnText.style.display = 'inline';
+                elements.registerLoader.style.display = 'none';
+                elements.completeRegistration.disabled = false;
+            }
+        }
+
+        // Показать уведомление
+        function showNotification(message, type = 'success') {
+            elements.notification.textContent = message;
+            elements.notification.className = `notification ${type}`;
+            elements.notification.classList.add('show');
+
+            setTimeout(() => {
+                elements.notification.classList.remove('show');
+            }, 3000);
+        }
+
+        // Инициализация при загрузке
+        document.addEventListener('DOMContentLoaded', init);
+    </script>
+</body>
+</html>

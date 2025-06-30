@@ -1,5 +1,9 @@
+import json
 import logging
 import re
+import threading
+from urllib import request
+
 import nest_asyncio
 import asyncio
 import time
@@ -20,13 +24,13 @@ from telegram.ext import Application, CommandHandler, CallbackQueryHandler, Mess
 from PIL import Image, ImageDraw, ImageFont
 
 from collections import defaultdict
-from flask import Flask
+from flask import Flask, app, jsonify, render_template
+from pathlib import Path
 
 
 
 
-
-
+app = Flask(__name__)
 nest_asyncio.apply()
 
 group_data = {}
@@ -36,6 +40,48 @@ BOT_TOKEN = "7628643183:AAFkpHzp0o7WTFOKa6pjApDl4FDpr6aAOzs"
 ERROR_GROUP_ID = -1002295285798  # ID группы для ошибок
 LANGUAGES = {"en": "English", "uk": "Українська", "ru": "Русский"}
 
+def run_flask():
+    port = int(os.environ.get("PORT", 5000))
+    app.run(host="0.0.0.0", port=port)
+
+@app.route('/')
+def index():
+    return render_template('index.html')
+
+@app.route('/admin')
+def admin_panel():
+    return render_template('index.html')
+
+@app.route('/api/verify_auth_code', methods=['POST'])
+def verify_auth_code():
+    data = request.get_json()
+    code = data.get('code')
+    # Проверка кода и возврат результата
+    return jsonify({'success': True, 'isRegistered': True, 'token': '...', 'expires': '...', 'user': {...}})
+
+@app.route('/api/register', methods=['POST'])
+def register():
+    data = request.get_json()
+    # Обработка регистрации
+    return jsonify({'success': True, 'token': '...', 'expires': '...', 'user': {...}})
+
+@app.route('/api/get_user_groups', methods=['POST'])
+def get_user_groups():
+    data = request.get_json()
+    telegram_id = data.get('telegram_id')
+    # Получение групп пользователя
+    return jsonify({'success': True, 'groups': [...]})
+
+@app.route('/api/update_group_settings', methods=['POST'])
+def update_group_settings():
+    data = request.get_json()
+    # Обновление настроек группы
+    return jsonify({'success': True, 'message': 'Настройки сохранены'})
+
+@app.route('/api/check_session', methods=['POST'])
+def check_session():
+    # Проверка сессии
+    return jsonify({'success': True, 'user': {...}})
 
 def get_language_keyboard(current_language):
     buttons = [
@@ -48,10 +94,6 @@ def get_language_keyboard(current_language):
         for lang in LANGUAGES
     ]
     return InlineKeyboardMarkup(buttons)
-
-
-
-
 
 """
 group_data = {
@@ -122,7 +164,6 @@ async def start(update: Update, context: CallbackContext):
     if update.message.chat.type not in ["group", "supergroup"]:
         language = group_data.get(chat_id, {}).get("language", "en")
         group_data.setdefault(chat_id, {})["language"] = language
-
         await update.message.reply_text(
             "Select your language / Оберіть мову / Выберите язык:",
             reply_markup=get_language_keyboard(language)
@@ -347,25 +388,20 @@ async def language(update: Update, context: CallbackContext):
         "Select your language:",
         reply_markup=get_language_keyboard(language)
     )
-
 async def set_language(update: Update, context: CallbackContext):
     """Обработчик кнопок выбора языка."""
     query = update.callback_query
     await query.answer()
-
     language = query.data.split("_")[-1]
     context.user_data["language"] = language
-
     await query.edit_message_text(
         f"Language set to {LANGUAGES[language]}",
         reply_markup=get_language_keyboard(language)
     )
-
 # Пример функции, где язык влияет на сообщение бота
 async def example_message(update: Update, context: CallbackContext):
     chat_id = update.effective_chat.id
     language = group_data.get(chat_id, {}).get("language", "en")
-
     messages = {
         "en": "This is an example message.",
         "uk": "Це приклад повідомлення.",
@@ -485,14 +521,11 @@ async def group_settings(update: Update, context: CallbackContext):
         [InlineKeyboardButton("Назад", callback_data=f"go_back_{group_id}")]
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
-
     response = (
         f"Настройки группы: {group_name}\n"
         f"- Язык группы: {LANGUAGES[group_language]}"
     )
     await edit_message_if_needed(query, response, reply_markup)
-
-
 
 async def rules(update: Update, context: CallbackContext):
     """Отображает правила группы."""
@@ -627,10 +660,8 @@ async def change_group_language(update: Update, context: CallbackContext):
     """Обработчик кнопки изменения языка группы."""
     query = update.callback_query
     await query.answer()
-
     group_id = int(query.data.split("_")[-1])
     current_language = group_data[group_id].get("language", "en")
-
     # Сообщение выбора языка группы
     message = await query.message.reply_text(
         "Выберите язык группы:",
@@ -638,27 +669,20 @@ async def change_group_language(update: Update, context: CallbackContext):
     )
     context.user_data["temp_message_id"] = message.message_id
     context.user_data["current_group_id"] = group_id
-
-
 async def set_group_language(update: Update, context: CallbackContext):
     """Устанавливает выбранный язык группы."""
     query = update.callback_query
     await query.answer()
-
     language = query.data.split("_")[-1]
     group_id = context.user_data.get("current_group_id")
-
     if group_id not in group_data:
         await query.message.reply_text("Ошибка: Группа не найдена.")
         return
-
     group_data[group_id]["language"] = language
-
     await context.bot.delete_message(
         chat_id=query.message.chat.id,
         message_id=context.user_data["temp_message_id"]
     )
-
     await query.edit_message_text(
         f"Настройки группы: {group_data[group_id]['group_name']}\n"
         f"- Язык группы: {LANGUAGES[language]}",
@@ -669,13 +693,6 @@ async def set_group_language(update: Update, context: CallbackContext):
             [InlineKeyboardButton("Назад", callback_data=f"go_back_{group_id}")]
         ])
     )
-
-
-
-
-
-
-
 
 async def group_details(update: Update, context: CallbackContext):
     query = update.callback_query
@@ -1467,6 +1484,222 @@ async def process_message(update: Update, context: CallbackContext):
         await save_feedback_attempts(update, context)
 
 
+# Пути к файлам
+AUTH_CODES_FILE = Path(__file__).parent / "auth_codes.json"
+USERS_FILE = Path(__file__).parent / "users.json"
+group_data = {}
+
+
+# Загрузка данных
+def load_data(file):
+    if os.path.exists(file):
+        with open(file, 'r') as f:
+            return json.load(f)
+    return {}
+
+
+# Сохранение данных
+def save_data(data, file):
+    with open(file, 'w') as f:
+        json.dump(data, f, indent=2)
+
+def load_group_data():
+    global group_data
+    try:
+        with open('group_data.json', 'r') as f:
+            group_data = json.load(f)
+    except (FileNotFoundError, json.JSONDecodeError):
+        group_data = {}
+
+def save_group_data():
+    with open('group_data.json', 'w') as f:
+        json.dump(group_data, f, indent=2)
+
+
+# Проверка существования пользователя
+def user_exists(telegram_id):
+    users = load_data(USERS_FILE)
+    return str(telegram_id) in users
+
+
+# Генерация кода авторизации
+async def website_auth(update: Update, context: CallbackContext):
+    user = update.effective_user
+    telegram_id = user.id
+
+    # Генерация 6-значного кода
+    code = ''.join(random.choices(string.ascii_uppercase + string.digits, k=6))
+
+    # Загрузка существующих кодов
+    auth_codes = load_data(AUTH_CODES_FILE)
+
+    # Сохранение нового кода
+    auth_codes[code] = {
+        'telegram_id': telegram_id,
+        'username': user.username,
+        'first_name': user.first_name,
+        'last_name': user.last_name,
+        'expires_at': (datetime.now() + timedelta(minutes=15)).isoformat()
+    }
+
+    save_data(auth_codes, AUTH_CODES_FILE)
+
+    await update.message.reply_text(
+        f"🔐 Ваш код для авторизации на сайте: <code>{code}</code>\n\n"
+        "Перейдите на сайт и введите этот код в соответствующее поле.\n"
+        "Код действителен 15 минут.",
+        parse_mode='HTML'
+    )
+
+
+# Проверка кода авторизации
+def check_auth_code(code):
+    auth_codes = load_data(AUTH_CODES_FILE)
+    code_data = auth_codes.get(code)
+
+    if not code_data:
+        return None
+
+    # Проверка срока действия
+    expires_at = datetime.fromisoformat(code_data['expires_at'])
+    if datetime.now() > expires_at:
+        return None
+
+    # Удаление использованного кода
+    del auth_codes[code]
+    save_data(auth_codes, AUTH_CODES_FILE)
+
+    return code_data
+
+
+# Регистрация пользователя
+def register_user(telegram_data, username, password):
+    users = load_data(USERS_FILE)
+    telegram_id = telegram_data['telegram_id']
+
+    users[str(telegram_id)] = {
+        'username': username,
+        'password': password,  # В реальном приложении нужно хешировать!
+        'telegram': telegram_data,
+        'registered_at': datetime.now().isoformat()
+    }
+
+    save_data(users, USERS_FILE)
+    return users[str(telegram_id)]
+
+
+# Получение информации о пользователе
+def get_user(telegram_id):
+    users = load_data(USERS_FILE)
+    return users.get(str(telegram_id))
+
+
+# Получение групп пользователя
+def get_user_groups(telegram_id):
+    # Эта функция должна возвращать группы пользователя из вашего group_data
+    # Здесь упрощенная реализация
+    groups = []
+
+    for group_id, group in group_data.items():
+        if str(telegram_id) in group['users']:
+            user_data = group['users'][str(telegram_id)]
+            groups.append({
+                'id': group_id,
+                'name': group['group_name'],
+                'members': len(group['users']),
+                'warnings': user_data['warnings'],
+                'is_admin': user_data.get('status') in ['administrator', 'creator'],
+                'settings': {
+                    'msgLimit': group.get('MAX_MESSAGES_PER_SECOND', 5),
+                    'muteTime': group.get('MUT_SECONDS', 60),
+                    'bannedWords': ', '.join(group.get('banned_words', []))
+                },
+                'rules': group.get('rules', 'Правила не установлены')
+            })
+
+    return groups
+
+
+@app.route('/get_user_groups', methods=['POST'])
+def handle_get_user_groups():
+    data = request.get_json()
+    telegram_id = data.get('telegram_id')
+
+    if not telegram_id:
+        return jsonify({'success': False, 'message': 'Не указан Telegram ID'}), 400
+
+    groups = []
+
+    # Используем другое имя переменной для цикла (например, group_info)
+    for group_id, group_info in group_data.items():
+        if str(telegram_id) in group_info['users']:
+            user_data = group_info['users'][str(telegram_id)]
+
+            # Считаем количество администраторов
+            admins_count = sum(
+                1 for user in group_info['users'].values()
+                if user.get('status') in ['administrator', 'creator']
+            )
+
+            groups.append({
+                'id': group_id,
+                'name': group_info['group_name'],
+                'members_count': len(group_info['users']),
+                'admins_count': admins_count,
+                'user_warnings': user_data.get('warnings', 0),
+                'rules': group_info.get('rules', 'Правила не установлены'),
+                'feedback': group_info.get('feedback', 'Обратная связь не настроена'),
+                'settings': {
+                    'MAX_MESSAGES_PER_SECOND': group_info.get('MAX_MESSAGES_PER_SECOND', 5),
+                    'MUT_SECONDS': group_info.get('MUT_SECONDS', 60),
+                    'banned_words': group_info.get('banned_words', []),
+                    'CAPTCHA_ENABLED': group_info.get('CAPTCHA_ENABLED', False),
+                    'CAPTCHA_TIMEOUT': group_info.get('CAPTCHA_TIMEOUT', 3600),
+                    'CAPTCHA_ATTEMPTS': group_info.get('CAPTCHA_ATTEMPTS', 3),
+                    'WARN_LIMIT': 5  # Стандартное значение
+                }
+            })
+
+    return jsonify({'success': True, 'groups': groups})
+
+@app.route('/update_group_settings', methods=['POST'])
+def handle_update_group_settings():
+    data = request.get_json()
+    group_id = data.get('group_id')
+    new_settings = data.get('settings')
+
+    if not group_id or not new_settings:
+        return jsonify({'success': False, 'message': 'Неверные данные'}), 400
+
+    if group_id not in group_data:
+        return jsonify({'success': False, 'message': 'Группа не найдена'}), 404
+
+    # Обновляем настройки группы
+    group_data[group_id]['group_name'] = new_settings.get('name', group_data[group_id]['group_name'])
+
+    # Обновляем числовые настройки
+    numeric_settings = [
+        'MAX_MESSAGES_PER_SECOND', 'MUT_SECONDS',
+        'CAPTCHA_TIMEOUT', 'CAPTCHA_ATTEMPTS', 'WARN_LIMIT'
+    ]
+
+    for setting in numeric_settings:
+        if setting in new_settings:
+            group_data[group_id][setting] = int(new_settings[setting])
+
+    # Обновляем булевы настройки
+    if 'CAPTCHA_ENABLED' in new_settings:
+        group_data[group_id]['CAPTCHA_ENABLED'] = bool(new_settings['CAPTCHA_ENABLED'])
+
+    # Обновляем список запрещенных слов
+    if 'banned_words' in new_settings:
+        group_data[group_id]['banned_words'] = [
+            word.strip() for word in new_settings['banned_words']
+            if word.strip()
+        ]
+
+    return jsonify({'success': True, 'message': 'Настройки обновлены'})
+
 async def main():
     application = Application.builder().token(BOT_TOKEN).build()
 
@@ -1522,10 +1755,13 @@ async def main():
     application.add_handler(CommandHandler("example", example_message))
     application.add_handler(CommandHandler("language", language))
     application.add_handler(CallbackQueryHandler(set_language, pattern="^set_language_"))
-
     application.add_handler(MessageHandler(filters.StatusUpdate.NEW_CHAT_MEMBERS, new_member))
 
+    # Добавьте этот обработчик в функцию main()
+    application.add_handler(CommandHandler("website_auth", website_auth))
+
     application.add_handler(MessageHandler(filters.TEXT, process_message))
+
 
     try:
         await application.run_polling()
@@ -1534,7 +1770,9 @@ async def main():
         await send_error_message(application, str(e), "Guardian_Помилки", None)
         logging.error(f"Ошибка в main: {e}")
 
-
-
 if __name__ == "__main__":
+    print("Запуск!")
+    load_group_data()
+    flask_thread = threading.Thread(target=run_flask)
+    flask_thread.start()
     asyncio.run(main())
